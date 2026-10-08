@@ -6,6 +6,9 @@ source:
   committed_at: '2026-10-08T10:25:52-07:00'
   branch: HEAD
 files:
+  LICENSE:
+    source: LICENSE
+    sha256: 20f050d81e7c7648d5ee90ba44b2a10bc90ac3750b00ea4b1225fe78f5d76bd5
   ao/components.yml:
     source: ansible/ao/components.yml
     sha256: 0af108a392e9f98d0ba745674cc102606682c371c8452748523bcc71237964a7
