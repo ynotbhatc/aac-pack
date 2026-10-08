@@ -16,6 +16,8 @@
 #   input: { "agent": "<dimension name>",
 #            "assessment": { "impact": 0-100, "importance": 0-100,
 #                            "reasons": "..;..", "confidence": 0.0-1.0 } }
+#   A missing confidence is 0 (unmeasured → low confidence); a confidence
+#   outside 0.0-1.0 is a malformed measurement and fails validation.
 #
 # Output (validate): { valid, agent, impact, importance, band, flags, reasons }
 #
@@ -29,14 +31,17 @@ import rego.v1
 # ── Normalization (agents' JSON may arrive string-typed via AO templating) ──
 impact := input.assessment.impact if is_number(input.assessment.impact)
 impact := to_number(input.assessment.impact) if is_string(input.assessment.impact)
+
 default impact := -1
 
 importance := input.assessment.importance if is_number(input.assessment.importance)
 importance := to_number(input.assessment.importance) if is_string(input.assessment.importance)
+
 default importance := -1
 
 confidence := input.assessment.confidence if is_number(input.assessment.confidence)
 confidence := to_number(input.assessment.confidence) if is_string(input.assessment.confidence)
+
 default confidence := 0
 
 # reasons may arrive as a list or (via AO scalar templating) one "; "-joined
@@ -55,16 +60,33 @@ valid if {
 	impact <= 100
 	importance >= 0
 	importance <= 100
+	confidence >= 0
+	confidence <= 1
 	count(reasons_given) > 0
 }
 
 default valid := false
 
 # ── Axis levels ───────────────────────────────────────────────────────────────
-level(s) := "low" if { s >= 0; s <= 24 }
-level(s) := "moderate" if { s >= 25; s <= 49 }
-level(s) := "high" if { s >= 50; s <= 74 }
-level(s) := "critical" if { s >= 75; s <= 100 }
+level(s) := "low" if {
+	s >= 0
+	s <= 24
+}
+
+level(s) := "moderate" if {
+	s >= 25
+	s <= 49
+}
+
+level(s) := "high" if {
+	s >= 50
+	s <= 74
+}
+
+level(s) := "critical" if {
+	s >= 75
+	s <= 100
+}
 
 # ── The risk matrix (operator-owned): band = matrix[impact][importance] ──────
 # High-impact findings that matter little are damped one step; anything
@@ -95,6 +117,17 @@ default low_confidence := false
 flags contains sprintf("low confidence: %v", [confidence]) if low_confidence
 
 flags contains "assessment structurally invalid — do not compose" if not valid
+
+flags contains sprintf("confidence %v outside 0.0-1.0", [confidence]) if {
+	not valid
+	is_number(confidence)
+	not confidence_in_range
+}
+
+confidence_in_range if {
+	confidence >= 0
+	confidence <= 1
+}
 
 validate := {
 	"valid": valid,

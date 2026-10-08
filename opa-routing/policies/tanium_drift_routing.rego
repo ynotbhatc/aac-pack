@@ -20,50 +20,101 @@
 #                "drift_trigger":  "<changed-file category>" }
 #   }
 #
-# Output (decision): { route, authority, agent_recommended, overrode_agent, reasons }
+# Output (decision): { route, authority, agent_recommended, overrode_agent,
+#                      invalid_input, reasons }
 #   route ∈ {compliant, auto_remediate, approve_remediate}
 #
 # FAIL-CLOSED: the default route is approve_remediate (a human). "compliant"
-# must be PROVEN (no drift AND a compliant baseline verdict); auto-remediation
-# must be EARNED (drift that is non-critical, unticketed, on a non-compliant
-# check). Missing or malformed facts land in front of a human, never in
-# silent auto-action. Thresholds are OWNED BY THE OPERATOR, not the model.
-# Demo-specific policy: lives here, never in the vendor-neutral rego library.
+# must be PROVEN (an explicit no-drift fact AND a compliant baseline verdict);
+# auto-remediation must be EARNED (drift that is non-critical, unticketed, on a
+# non-compliant check). Missing or malformed facts land in front of a human,
+# never in silent auto-action — a boolean fact that is present but not a
+# recognized encoding ("yes", 1, []) is never coerced to false, because that
+# would downgrade a critical signal to routine drift. Thresholds are OWNED BY
+# THE OPERATOR, not the model. Demo-specific policy: lives here, never in the
+# vendor-neutral rego library.
 
 package aac.tanium.drift_routing
 
 import rego.v1
 
-# ── Input normalization (set_stats may stringify booleans) ────────────
+facts := object.get(input, "facts", {})
 
-any_drift if input.facts.any_drift == true
-any_drift if input.facts.any_drift == "true"
+# ── Input normalization (set_stats / AO templating may stringify booleans) ──
+# as_bool is TOTAL: every value resolves to exactly one boolean, so a derived
+# fact is never undefined. Unrecognized encodings coerce to false here AND are
+# caught separately by invalid_input below, so they can never earn auto.
+as_bool(v) := v if is_boolean(v)
 
-critical_drift if input.facts.critical_drift == true
-critical_drift if input.facts.critical_drift == "true"
+as_bool(v) if {
+	is_string(v)
+	lower(trim_space(v)) == "true"
+}
 
-baseline_compliant if input.facts.baseline_compliant == true
-baseline_compliant if input.facts.baseline_compliant == "true"
+as_bool(v) := false if {
+	is_string(v)
+	lower(trim_space(v)) != "true"
+}
+
+as_bool(v) := false if is_null(v)
+
+as_bool(v) := false if {
+	not is_boolean(v)
+	not is_string(v)
+	not is_null(v)
+}
+
+_recognized_bool(v) if is_boolean(v)
+
+_recognized_bool(v) if {
+	is_string(v)
+	lower(trim_space(v)) in {"true", "false", ""}
+}
+
+_recognized_bool(v) if is_null(v)
+
+_bool_fact_keys := {"any_drift", "critical_drift", "baseline_compliant"}
+
+# A boolean fact that is present but not a recognized encoding.
+invalid_input if {
+	some k in _bool_fact_keys
+	val := facts[k]
+	not _recognized_bool(val)
+}
+
+default invalid_input := false
+
+_present(k) if k in object.keys(facts)
+
+any_drift := as_bool(object.get(facts, "any_drift", false))
+
+critical_drift := as_bool(object.get(facts, "critical_drift", false))
+
+baseline_compliant := as_bool(object.get(facts, "baseline_compliant", false))
 
 has_change_ticket if {
-	is_string(input.facts.change_ticket)
-	trim_space(input.facts.change_ticket) != ""
+	is_string(facts.change_ticket)
+	trim_space(facts.change_ticket) != ""
 }
 
 # ── Route decision — fail-closed to a human ───────────────────────────
 
 default route := "approve_remediate"
 
-# Compliant must be proven: no drift AND the baseline verdict agrees.
+# Compliant must be PROVEN: an explicit, well-formed no-drift fact AND the
+# baseline verdict agrees. An absent any_drift is not "no drift".
 route := "compliant" if {
+	not invalid_input
+	_present("any_drift")
 	not any_drift
 	baseline_compliant
 }
 
-# Auto-remediation must be earned: real drift, non-critical class, no
-# authorized change ticket on record (an authorized change must never be
-# silently reverted — a human decides against the ticket).
+# Auto-remediation must be earned: well-formed facts, real drift, non-critical
+# class, no authorized change ticket on record (an authorized change must never
+# be silently reverted — a human decides against the ticket).
 route := "auto_remediate" if {
+	not invalid_input
 	any_drift
 	not critical_drift
 	not has_change_ticket
@@ -90,17 +141,28 @@ reasons contains "non-critical drift, no change ticket — auto-remediation perm
 	route == "auto_remediate"
 }
 
+reasons contains "invalid/unrecognized input fact — fail-closed to human approval" if invalid_input
+
 reasons contains "critical drift class (selinux/sshd) — human approval required" if {
+	not invalid_input
 	any_drift
 	critical_drift
 }
 
-reasons contains sprintf("authorized change ticket %v on record — never silently revert an authorized change; human decides", [input.facts.change_ticket]) if {
+reasons contains sprintf("authorized change ticket %v on record — never silently revert an authorized change; human decides", [facts.change_ticket]) if {
+	not invalid_input
 	any_drift
 	has_change_ticket
 }
 
+reasons contains "drift reported but the baseline verdict is compliant — contradictory facts, human decides" if {
+	not invalid_input
+	any_drift
+	baseline_compliant
+}
+
 reasons contains "facts incomplete or unproven — fail-closed to human approval" if {
+	not invalid_input
 	route == "approve_remediate"
 	not any_drift
 }
@@ -112,5 +174,6 @@ decision := {
 	"authority": "policy",
 	"agent_recommended": object.get(input, ["agent", "recommended_route"], "absent"),
 	"overrode_agent": overrode_agent,
+	"invalid_input": invalid_input,
 	"reasons": reasons,
 }

@@ -25,7 +25,8 @@
 #   rollback_paused           yes|no   (default: no)  global enforcement freeze
 #   authorized_change_hosts   string   (default: "")   comma-separated hostnames
 #                                                       under an authorized change
-#   opa_routing_url           string   in-cluster routing OPA (has a sane default)
+#   opa_routing_url           string   REQUIRED — the routing OPA, from site_config.yml
+#                                      or extra_vars; the play refuses to run without it
 #
 # Example extra_vars:
 #   rollback_paused=yes
@@ -36,16 +37,31 @@
   connection: local
   gather_facts: false
 
-  # opa_routing_url comes from site_config.yml (per-environment) — never
-  # hardcode an in-cluster endpoint in a playbook.
-  vars_files:
-    - ../vars/site_config.yml
-
   vars:
     rollback_paused: false
     # authorized_change_hosts: <set via extra_vars / survey / inventory>
 
   tasks:
+    # site_config.yml is gitignored and absent from AAP project checkouts (and
+    # from the sales.demos pack): load it when present, otherwise
+    # opa_routing_url arrives as an extra var. Never a hardcoded endpoint here.
+    - name: Load optional local config
+      ansible.builtin.include_vars: "{{ item }}"
+      with_first_found:
+        - files:
+            - "{{ playbook_dir }}/../vars/site_config.yml"
+          skip: true
+
+    - name: Require the routing OPA endpoint to be configured
+      ansible.builtin.assert:
+        that:
+          - opa_routing_url is defined
+          - opa_routing_url | string | length > 0
+        fail_msg: >-
+          opa_routing_url is not set. Define it in ansible/vars/site_config.yml or pass
+          it as an extra var (e.g. the routing OPA Service URL). No default is assumed.
+        quiet: true
+
     - name: Normalize authorized_change_hosts into a clean list
       ansible.builtin.set_fact:
         _authorized_hosts: >-

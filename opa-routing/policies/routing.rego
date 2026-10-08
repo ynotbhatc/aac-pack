@@ -42,6 +42,7 @@ blast_radius_threshold := 100
 
 affected_count := input.facts.affected_count if is_number(input.facts.affected_count)
 affected_count := to_number(input.facts.affected_count) if is_string(input.facts.affected_count)
+
 default affected_count := 0
 
 has_vendor_fix if input.facts.has_vendor_fix == true

@@ -573,28 +573,32 @@
                 "valid": "${gate_tech_debt.body.result.valid}",
                 "impact": "${gate_tech_debt.body.result.impact}",
                 "importance": "${gate_tech_debt.body.result.importance}",
-                "low_confidence": "${gate_tech_debt.body.result.low_confidence}"
+                "low_confidence": "${gate_tech_debt.body.result.low_confidence}",
+                "flags": "${gate_tech_debt.body.result.flags}"
               },
               "environment": {
                 "band": "${gate_environment.body.result.band}",
                 "valid": "${gate_environment.body.result.valid}",
                 "impact": "${gate_environment.body.result.impact}",
                 "importance": "${gate_environment.body.result.importance}",
-                "low_confidence": "${gate_environment.body.result.low_confidence}"
+                "low_confidence": "${gate_environment.body.result.low_confidence}",
+                "flags": "${gate_environment.body.result.flags}"
               },
               "blast_radius": {
                 "band": "${gate_blast_radius.body.result.band}",
                 "valid": "${gate_blast_radius.body.result.valid}",
                 "impact": "${gate_blast_radius.body.result.impact}",
                 "importance": "${gate_blast_radius.body.result.importance}",
-                "low_confidence": "${gate_blast_radius.body.result.low_confidence}"
+                "low_confidence": "${gate_blast_radius.body.result.low_confidence}",
+                "flags": "${gate_blast_radius.body.result.flags}"
               },
               "patch_known_state": {
                 "band": "${gate_patch_known_state.body.result.band}",
                 "valid": "${gate_patch_known_state.body.result.valid}",
                 "impact": "${gate_patch_known_state.body.result.impact}",
                 "importance": "${gate_patch_known_state.body.result.importance}",
-                "low_confidence": "${gate_patch_known_state.body.result.low_confidence}"
+                "low_confidence": "${gate_patch_known_state.body.result.low_confidence}",
+                "flags": "${gate_patch_known_state.body.result.flags}"
               }
             }
           }

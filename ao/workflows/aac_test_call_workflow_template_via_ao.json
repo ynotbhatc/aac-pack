@@ -17,7 +17,7 @@
       },
       "parameters": {
         "extra_vars": {
-          "target_hostname": "${trigger.target_hostname}"
+          "target_host": "${trigger.target_hostname}"
         },
         "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
         "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",

@@ -6,11 +6,14 @@
 # governance receipts (policy route, overrode_agent, rollback_verified).
 #
 # FAIL-CLOSED: the row claims compliance ONLY when the outcome is proven —
-# route == compliant (no drift, baseline verdict clean), or a remediation
-# route whose rollback was VERIFIED (rollback_verified from the Rollback
-# job's set_stats). A remediation that was not verified is recorded as
-# NON-compliant, with a violation message. Evidence never claims a
-# remediation that did not provably happen.
+# an EXPLICIT upstream route == compliant (the policy's verdict: no drift,
+# baseline verdict clean), or a remediation route whose rollback was VERIFIED
+# (rollback_verified from the Rollback job's set_stats). A remediation that
+# was not verified is recorded as NON-compliant, with a violation message.
+# No route at all (artifact missing, playbook launched by hand) keeps the
+# default route=hold and is recorded NON-compliant with its own violation
+# text — the default is never the compliant path. Evidence never claims a
+# baseline that was not provably checked.
 #
 # mac-aap variant: direct INSERT (this tree carries no roles). Rows are
 # UNSIGNED here — metadata records caa_signed:false so nobody mistakes the
@@ -20,6 +23,7 @@
 #   target_host        — Deployment label (default: demo-rhel9)
 #   framework          — compliance_results.framework (default: nerc_cip_ocp)
 #   route              — policy route: compliant | auto_remediate | approve_remediate
+#                        (REQUIRED for a compliant row; default "hold" → non-compliant)
 #   overrode_agent     — did policy override the agent's recommendation (bool)
 #   rollback_verified  — Rollback job's verified outcome (bool; fail-closed)
 
@@ -31,7 +35,7 @@
   vars:
     target_host:       "demo-rhel9"
     framework:         "nerc_cip_ocp"
-    route:             "compliant"
+    route:             "hold"
     overrode_agent:    false
     rollback_verified: false
     pg_host:       "compliance-db.aac.svc.cluster.local"
@@ -46,8 +50,11 @@
          (_remediation_route | bool and rollback_verified | bool) }}
     _violations: >-
       {{ [] if _at_baseline | bool else
-         ['CIP-010 baseline: drift detected and remediation NOT verified (route=' ~ route ~
-          ', rollback_verified=' ~ (rollback_verified | bool) ~ ')'] }}
+         (['CIP-010 baseline: no policy verdict supplied (route=' ~ route ~
+           ') — baseline status unknown, recorded as non-compliant']
+          if not (route == 'compliant' or _remediation_route | bool) else
+          ['CIP-010 baseline: drift detected and remediation NOT verified (route=' ~ route ~
+           ', rollback_verified=' ~ (rollback_verified | bool) ~ ')']) }}
 
   tasks:
     - name: Record the enforcement outcome
@@ -88,4 +95,4 @@
         msg:
           - "Evidence row {{ evidence_row.query_result[0].id }} written for {{ target_host }} ({{ framework }})."
           - "  Route: {{ route }} | overrode_agent: {{ overrode_agent | bool }} | rollback verified: {{ rollback_verified | bool }}"
-          - "  {{ 'COMPLIANT row recorded.' if _at_baseline | bool else 'NON-COMPLIANT row recorded — remediation unverified; the evidence says so.' }}"
+          - "  {{ 'COMPLIANT row recorded.' if _at_baseline | bool else ('NON-COMPLIANT row recorded — no policy verdict supplied (route=' ~ route ~ ').' if not (route == 'compliant' or _remediation_route | bool) else 'NON-COMPLIANT row recorded — remediation unverified; the evidence says so.') }}"

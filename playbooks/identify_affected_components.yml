@@ -49,10 +49,6 @@
   connection: local
   gather_facts: false
 
-  vars_files:
-    - [ "../vars/vault_secrets.yml", "../vars/empty_fallback.yml" ]
-    - ../vars/site_config.yml
-
   vars:
     pg_port: "{{ compliance_db_port | default(5432) }}"
     pg_db: "compliance"
@@ -67,7 +63,36 @@
     max_inventory_age_hours: "{{ max_inventory_age | default(168) | int }}"
 
   tasks:
+    # site_config.yml and vault_secrets.yml are gitignored and absent from AAP
+    # project checkouts (and from the sales.demos pack); load them when present,
+    # otherwise every value arrives as an extra var, survey answer or credential.
+    - name: Load optional local config
+      ansible.builtin.include_vars: "{{ item }}"
+      with_first_found:
+        - files:
+            - "{{ playbook_dir }}/../vars/site_config.yml"
+          skip: true
 
+    - name: Load optional local secrets
+      ansible.builtin.include_vars: "{{ item }}"
+      with_first_found:
+        - files:
+            - "{{ playbook_dir }}/../vars/vault_secrets.yml"
+          skip: true
+
+    - name: Require the database connection to be configured
+      ansible.builtin.assert:
+        that:
+          - pg_host is defined
+          - pg_host | string | length > 0
+          - compliance_db_password is defined
+        fail_msg: >-
+          pg_host and compliance_db_password must be set — from ansible/vars/site_config.yml
+          and vault_secrets.yml on a workstation, or from extra_vars / a credential on AAP.
+          No in-cluster default is assumed.
+        quiet: true
+
+      no_log: true  # the assertion names a secret variable; keep its evaluation out of job output
     # -------------------------------------------------------------------------
     # Guard rails — matching against stale or absent data manufactures false
     # confidence, which is worse than reporting nothing.

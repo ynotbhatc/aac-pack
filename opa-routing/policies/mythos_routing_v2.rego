@@ -42,10 +42,16 @@ has_vendor_fix if input.urgency.has_vendor_fix == true
 has_vendor_fix if input.urgency.has_vendor_fix == "true"
 
 max_severity := upper(input.urgency.max_severity) if is_string(input.urgency.max_severity)
+
 default max_severity := "UNKNOWN"
+
+known_bands := {"low", "moderate", "high", "critical"}
 
 band(dim) := b if b := input.assessments[dim].band
 band(dim) := "missing" if not input.assessments[dim].band
+
+# A band the matrix never produces ("", "invalid", "weird") cannot be composed.
+band_known(dim) if band(dim) in known_bands
 
 # `valid` may arrive as a native bool or a templated string ("true"/"True").
 dim_valid(dim) if input.assessments[dim].valid == true
@@ -63,6 +69,11 @@ low_conf_dims contains dim if {
 invalid_dims contains dim if {
 	some dim in dimensions
 	not dim_valid(dim)
+}
+
+invalid_dims contains dim if {
+	some dim in dimensions
+	not band_known(dim)
 }
 
 critical_dims contains dim if {
@@ -117,8 +128,8 @@ route := "approve" if {
 	high_urgency
 }
 
-# A dimension measured with unreliable confidence cannot support auto: the
-# unmeasured is not the safe. It routes to a human instead.
+# A dimension measured with unreliable confidence cannot support auto:
+# unmeasured is not safe. It routes to a human instead.
 route := "approve" if {
 	count(invalid_dims) == 0
 	has_vendor_fix
@@ -139,7 +150,16 @@ route := "auto" if {
 }
 
 # ── Reasons — every route explains itself (the log's contract) ───────────────
-reasons contains sprintf("assessment for '%s' was structurally invalid — refusing to route on it", [dim]) if some dim in invalid_dims
+reasons contains sprintf("assessment for '%s' was structurally invalid — refusing to route on it", [dim]) if {
+	some dim in invalid_dims
+	not dim_valid(dim)
+}
+
+reasons contains sprintf("assessment for '%s' carries an unrecognized band '%v' — refusing to route on it", [dim, band(dim)]) if {
+	some dim in invalid_dims
+	dim_valid(dim)
+	not band_known(dim)
+}
 
 reasons contains "no vendor fix exists — investigate/replace, not patch" if {
 	count(invalid_dims) == 0
@@ -173,9 +193,32 @@ reasons contains sprintf("dimension '%s' measured with low confidence — unmeas
 }
 
 # ── Carried flags from the validation gates (clamps, low confidence) ─────────
-flags contains sprintf("%s: %s", [dim, f]) if {
+# The gate returns flags as a list; the AO http_request body templates them in
+# as a scalar, which may arrive as a native list or as one "; "-joined string.
+dim_flags(dim) := f if {
+	f := input.assessments[dim].flags
+	is_array(f)
+}
+
+dim_flags(dim) := [t |
+	some s in split(input.assessments[dim].flags, ";")
+	t := trim(trim_space(s), "[]'\"")
+	t != ""
+] if {
+	is_string(input.assessments[dim].flags)
+}
+
+dim_flags(dim) := [] if not input.assessments[dim].flags
+
+dim_flags(dim) := [] if {
+	f := input.assessments[dim].flags
+	not is_array(f)
+	not is_string(f)
+}
+
+flags contains sprintf("%s: %v", [dim, f]) if {
 	some dim in dimensions
-	some f in input.assessments[dim].flags
+	some f in dim_flags(dim)
 }
 
 dimension_summary := {dim: {

@@ -38,7 +38,8 @@
         db: "{{ pg_db }}"
         query: |
           SELECT os_family, os_distribution, os_version,
-                 facts->'ansible_facts'->>'ansible_kernel' AS kernel,
+                 COALESCE(facts->'host'->>'kernel',
+                          facts->'ansible_facts'->>'ansible_kernel') AS kernel,
                  collected_at
           FROM host_facts_latest WHERE hostname = %s
         positional_args: ["{{ target_host }}"]
@@ -85,6 +86,17 @@
         positional_args: ["{{ target_host }}"]
       register: patch_q
 
+    - name: Pending patch work — total count (the detail above is capped at 10)
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db: "{{ pg_db }}"
+        query: "SELECT count(*) AS n FROM patch_worklist WHERE hostname = %s"
+        positional_args: ["{{ target_host }}"]
+      register: patchcount_q
+
     - name: Latest compliance verdicts per framework
       community.postgresql.postgresql_query:
         login_host: "{{ pg_host }}"
@@ -125,7 +137,7 @@
           - "Facts as of: {{ os_q.query_result[0].collected_at if os_q.query_result else '-' }}"
           - "Installed packages on file: {{ pkgcount_q.query_result[0].n }}"
           - "Selected versions: {{ pkg_q.query_result | map(attribute='package_name') | zip(pkg_q.query_result | map(attribute='package_version')) | map('join', '=') | list }}"
-          - "Pending patch items: {{ patch_q.query_result | length }}{{ ' (top: ' ~ (patch_q.query_result[0].cve_id ~ ' ' ~ patch_q.query_result[0].product ~ ' ' ~ patch_q.query_result[0].installed_version ~ ' → ' ~ patch_q.query_result[0].fixed_version) ~ ')' if patch_q.query_result else '' }}"
+          - "Pending patch items: {{ patchcount_q.query_result[0].n }}{{ ' (top: ' ~ (patch_q.query_result[0].cve_id ~ ' ' ~ patch_q.query_result[0].product ~ ' ' ~ patch_q.query_result[0].installed_version ~ ' → ' ~ patch_q.query_result[0].fixed_version) ~ ')' if patch_q.query_result else '' }}"
           - "Compliance verdicts: {{ verdict_q.query_result | map(attribute='framework') | zip(verdict_q.query_result | map(attribute='compliant')) | map('join', '=') | list }}"
           - "Golden baseline: {{ baseline_q.query_result[0].baseline_label if baseline_q.query_result else 'none' }} ({{ baseline_q.query_result[0].captured_at if baseline_q.query_result else '-' }})"
 
@@ -138,5 +150,5 @@
           state_kernel: "{{ os_q.query_result[0].kernel if os_q.query_result else 'unknown' }}"
           state_facts_as_of: "{{ os_q.query_result[0].collected_at if os_q.query_result else '' }}"
           state_package_count: "{{ pkgcount_q.query_result[0].n }}"
-          state_pending_patches: "{{ patch_q.query_result | length }}"
+          state_pending_patches: "{{ patchcount_q.query_result[0].n }}"
           state_frameworks_tracked: "{{ verdict_q.query_result | length }}"

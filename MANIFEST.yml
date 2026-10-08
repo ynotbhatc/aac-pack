@@ -2,16 +2,16 @@
 pack_version: 1
 source:
   repository: ynotbhatc/compliance
-  commit: c8135bfca32d0dc0c6596ee735a9e7d7d5a488ba
-  committed_at: '2026-10-08T10:25:52-07:00'
-  branch: HEAD
+  commit: ''
+  committed_at: ''
+  branch: ''
 files:
   LICENSE:
     source: LICENSE
     sha256: 20f050d81e7c7648d5ee90ba44b2a10bc90ac3750b00ea4b1225fe78f5d76bd5
   ao/components.yml:
     source: ansible/ao/components.yml
-    sha256: 0af108a392e9f98d0ba745674cc102606682c371c8452748523bcc71237964a7
+    sha256: 5e7a5d4cc529b18716f3e9990a06d985ef4292c586161040513ba83449abc2e8
   ao/workflows/aac_ami_golden_meter_governed_ao.json:
     source: ansible/ao/workflows/aac_ami_golden_meter_governed_ao.json
     sha256: bcc094825b262ea38e53c322925ef93258f9deb9e656f192acb54f7dc5cd924e
@@ -23,13 +23,13 @@ files:
     sha256: 8d8cff892d396e28febab044a407fcea08ac07061e196632d904bd90098a1cc1
   ao/workflows/aac_mythos_patch_governed_opa_lab_aap.json:
     source: ansible/ao/workflows/aac_mythos_patch_governed_opa_lab_aap.json
-    sha256: 60925e15b8913e26312db162f97c142db9f5ca88f3f2ca5fc0cd5bb9c7d40405
+    sha256: b8ebdc7ef6f999162cd979483d7d7ce56b39abe7229b95a137817609a07a17c5
   ao/workflows/aac_tanium_comparison_governed_drift_lab_aap.json:
     source: ansible/ao/workflows/aac_tanium_comparison_governed_drift_lab_aap.json
     sha256: ad2d8769b1d2a15e4a7520711ba766d21bc899f64a07a0d9d4f9a617df9f9108
   ao/workflows/aac_test_call_workflow_template_via_ao.json:
     source: ansible/ao/workflows/aac_test_call_workflow_template_via_ao.json
-    sha256: 774e7810cf07f158e496f1a20ef8679e232ad653e50cfacce43fe71dd2c15c90
+    sha256: a4f8700f57b04c4678244942a82de721b929243133926dba1b0eabee9ec57a8c
   files/ai_action_log_schema.sql:
     source: ansible/files/ai_action_log_schema.sql
     sha256: 1fd14324213b51a6ca9f1edf7c412aa74ac559c890ee1461892d989fa1c3f065
@@ -65,10 +65,10 @@ files:
     sha256: 98e8b27a03642a9bfcb3f4f26bc167565c7224e7b6a70c985c20bae50067ffd6
   opa-routing/README.md:
     source: ansible/opa-routing/README.md
-    sha256: 7bc0d182935b47245be058e3fb37c076868904db3066c896c333933bc80cba1a
+    sha256: d093cee9a7a8edcf069a8ff63f435ff1088453d1456a0f4640e00925ffbf5803
   opa-routing/policies/ami_routing.rego:
     source: ansible/opa-routing/policies/ami_routing.rego
-    sha256: cb9d02be3a6aa5b8a88cfd1295d91caf21dc54f3bbc8c52fe31631139f9b3074
+    sha256: 84dbb90af74aae2e043a0e1967c5f80f1618ce8c105c71a90e75417c3adbbfa3
   opa-routing/policies/drift_routing.rego:
     source: ansible/opa-routing/policies/drift_routing.rego
     sha256: 55c82ce54d4b897a4d88ff4f2b50fe241b39203aae30c3c6bd2ebf2b0958629d
@@ -80,25 +80,37 @@ files:
     sha256: 85b0d6c49b11f38fc08b7428838806f27f21db02391c1891832a33fc4d12af06
   opa-routing/policies/mythos_routing_v2.rego:
     source: ansible/opa-routing/policies/mythos_routing_v2.rego
-    sha256: 9cc36615ca223706bb25aa29012ecde8f20584e97248611df6d099e87233b24c
+    sha256: 73ac64a03be86ad17a6a5528135c81c938db8039d2a17c6990a8684ed99e492c
   opa-routing/policies/mythos_scoring.rego:
     source: ansible/opa-routing/policies/mythos_scoring.rego
-    sha256: 56f334020aa83e10074166513a2a658a5076ef8d422738c232c7dc81dcf6db79
+    sha256: fbe7ec763d18de3729842545333d76a3c5ac13cc8039b675181b642e1446df6f
   opa-routing/policies/routing.rego:
     source: ansible/opa-routing/policies/routing.rego
-    sha256: a9d2185d252c579bf275dac354777fbdd4f8a354f367bf6c82a32a988b843a13
+    sha256: 698e3094fe7553b0eb906b70aee1011fb576cdb7297c94615ff38fe736dc3044
   opa-routing/policies/tanium_drift_routing.rego:
     source: ansible/opa-routing/policies/tanium_drift_routing.rego
-    sha256: 3ba2f2e0efec31999ef9b40695b1b634794aaa4278b67fd626767815ea044c34
+    sha256: 6a36975b30bec231ee70b81b474c880ea0b66db567d64daac5df3361f0f32cd6
+  opa-routing/policies/tests/ami_routing_test.rego:
+    source: ansible/opa-routing/policies/tests/ami_routing_test.rego
+    sha256: 72fd3eebd3b96e507cc37786c9ae10fe77e5b4e820358843f40d6f9223561194
   opa-routing/policies/tests/drift_routing_test.rego:
     source: ansible/opa-routing/policies/tests/drift_routing_test.rego
     sha256: 25ebc6f5ae5a38f071489fdc3c700dec6579ea50a7140f2ad1f279163c44db55
+  opa-routing/policies/tests/mythos_routing_v2_test.rego:
+    source: ansible/opa-routing/policies/tests/mythos_routing_v2_test.rego
+    sha256: 1174322a860a244c8311bd79fa83ae14d5f166909e1f06f4b0324cce7fb294fa
+  opa-routing/policies/tests/mythos_scoring_test.rego:
+    source: ansible/opa-routing/policies/tests/mythos_scoring_test.rego
+    sha256: 1558249e716a427fce70374baec919ce59e4cfb1abaf05ad00ef2887f312d9d0
+  opa-routing/policies/tests/tanium_drift_routing_test.rego:
+    source: ansible/opa-routing/policies/tests/tanium_drift_routing_test.rego
+    sha256: 7ce0d0b1e6f3b54c2fc36681cc7de4914cade2c212226080a23e59120301af47
   playbooks/cip_008_incident_response.yml:
     source: ansible/playbooks/cip_008_incident_response.yml
     sha256: faf4cef45e4d2728a41eb5e4f08163a315d2df4bde8f1245cfc59ce1518383e8
   playbooks/current_state_query_macaap.yml:
     source: contrib/mac-aap/playbooks/current_state_query_macaap.yml
-    sha256: b7abce8290254a5a6f08023ea66306067a6487add82ff59619b9bf484750df8a
+    sha256: f1b7b15a216d9c71ee6114d11333413b3f16072ba2f0f61c857a1bfd3dcb99c5
   playbooks/golden_image_check_macaap.yml:
     source: contrib/mac-aap/playbooks/golden_image_check_macaap.yml
     sha256: 73763d0e5a13b7cb0496becf37da54dc3de667ec8cb4e45cc788fcbc2063f64b
@@ -110,19 +122,19 @@ files:
     sha256: 35c1005bacd8669d9087ced6ad53f38b37c8ccfd04cd106c637f3df27975e06c
   playbooks/golden_image_set_rollback_pause.yml:
     source: ansible/playbooks/golden_image_set_rollback_pause.yml
-    sha256: f0673e3dc448432533baca075d0590906abb6f2f14f2fb59832fdaac690d5bfe
+    sha256: e7a6c65ce6fdd35c1a4d91749e72938f624235e412481d206419cd2f2e9b6ca6
   playbooks/golden_image_store_evidence_macaap.yml:
     source: contrib/mac-aap/playbooks/golden_image_store_evidence_macaap.yml
-    sha256: 389dcac0e492734bf6bc4c2a3087b86b57557fc0a8644972c593693a88d10beb
+    sha256: 9f2c1f65180c69d85abf862d43e0f968ed635bf135a3bb553f2105f9fc1480e3
   playbooks/identify_affected_components.yml:
     source: ansible/playbooks/identify_affected_components.yml
-    sha256: 567f1c93f64186052f8296de6c8607732838544bdd87dd8bd4f4c97651968afd
+    sha256: 271c731356ec3b97f1db0a195283861cfc39b5d21bbead14ae7325d2c2ac274d
   playbooks/record_ai_decision.yml:
     source: ansible/playbooks/record_ai_decision.yml
     sha256: 7d92e2106028b10b622cb2c611982385ec2ec887b337f51c7351971d75574873
   playbooks/simulate_patch_lifecycle.yml:
     source: ansible/playbooks/simulate_patch_lifecycle.yml
-    sha256: a77b6ee11808b603ad7ebaab0c3f03dc6cf1a1c37fa1c5a999fd1f142c0bb783
+    sha256: e10ca23de57054d7280e903f833545385ead028a7c96dca828999a22606edde9
   roles/aac_compliance_db/README.md:
     source: ansible/roles/aac_compliance_db/README.md
     sha256: 45ff53a3e9268b571096751fd50e37c0701c7fb9985c63f5a2da3d56eed1793a

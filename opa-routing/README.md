@@ -24,8 +24,25 @@ These are the source-of-truth copies. The running container loads them from the
 | `policies/mythos_routing_v2.rego` | `aac.mythos.routing_v2` → `decision` | composed routing over the converged agent scores (Mythos patch demo v2) |
 
 **Captured 2026-10-08:** the last four files existed only in the live `routing-policy` ConfigMap
-(deployment revision 15, 2026-10-07) and are now versioned here, byte-identical to what runs. The
-six AO workflows that call them are exported under [`../ao/`](../ao/README.md).
+(deployment revision 15, 2026-10-07). They were captured byte-identical and then **hardened in the
+same PR** (review of #778), so this directory is now *ahead* of the lab ConfigMap until the loader
+job runs again:
+
+- `tanium_drift_routing` — total boolean normalization plus an `invalid_input` guard: a malformed
+  fact (`"yes"`, `1`, `[]`) or an absent `any_drift` can no longer reach `compliant` or
+  `auto_remediate`; both land on `approve_remediate` with the reason recorded.
+- `ami_routing` — `bad_actor_suspected` is accepted as native `true` **or** the templated string
+  `"true"` (the AO body quotes it); a malformed flag routes to `approve`, never `auto`. If the
+  asset-criticality gate (`data.aac.ami.gate`) is not loaded, the asset is treated as critical.
+  **That gate is not in this directory or the ConfigMap today**, so the AMI auto-rollback path
+  routes to `approve` until the gate policy is versioned and loaded.
+- `mythos_scoring` — a `confidence` outside 0.0–1.0 is a malformed measurement (`valid: false`).
+- `mythos_routing_v2` — a band the matrix never produces is invalid (→ `investigate`); carried
+  `flags` accept the list the gate returns or the `"; "`-joined string AO templating produces.
+
+Every route of all five decision policies is covered by `policies/tests/` (`opa test`, run in CI by
+"Validate AO Routing Policies"). The six AO workflows that call them are exported under
+[`../ao/`](../ao/README.md).
 
 ## Managed-change / rollback-pause (the `hold` route)
 
@@ -94,18 +111,33 @@ oc create configmap routing-policy -n aac-policy \
   --from-file=routing.rego=policies/routing.rego \
   --from-file=drift_routing.rego=policies/drift_routing.rego \
   --from-file=gpuflex_routing.rego=policies/gpuflex_routing.rego \
+  --from-file=tanium_drift_routing.rego=policies/tanium_drift_routing.rego \
+  --from-file=ami_routing.rego=policies/ami_routing.rego \
+  --from-file=mythos_scoring.rego=policies/mythos_scoring.rego \
+  --from-file=mythos_routing_v2.rego=policies/mythos_routing_v2.rego \
   --from-file=golden_config.json=policies/golden_config.json \
   --dry-run=client -o yaml | oc apply -f -
 
 oc rollout restart deploy/opa-routing -n aac-policy
 ```
 
-The deployment loads every file explicitly (order matters — data file last):
+The deployment loads every file explicitly (order matters — data file last). The file list in the
+Deployment args, in `routing_files` of `ansible/playbooks/load_opa_routing.yml` and in the recipe
+above must be the same seven `.rego` files; a policy missing from any of them is one a fresh
+environment never loads, and the AO endpoint that calls it returns an empty result:
 
 ```
 opa run --server --addr=0.0.0.0:8181 --log-level=info --set=decision_logs.console=true \
-  /policies/routing.rego /policies/drift_routing.rego \
-  /policies/gpuflex_routing.rego /policies/golden_config.json
+  /policies/routing.rego /policies/drift_routing.rego /policies/gpuflex_routing.rego \
+  /policies/tanium_drift_routing.rego /policies/ami_routing.rego \
+  /policies/mythos_scoring.rego /policies/mythos_routing_v2.rego \
+  /policies/golden_config.json
+```
+
+Check what the running Deployment actually lists:
+
+```bash
+oc -n aac-policy get deploy opa-routing -o jsonpath='{.spec.template.spec.containers[0].args}'
 ```
 
 ## Verify
@@ -139,6 +171,7 @@ oc run tmp -n aac-policy --rm -i --restart=Never \
   http://opa-routing.aac-policy.svc.cluster.local:8181/v1/data/aac/golden/config
 ```
 
-> Offline check (no cluster): `opa test ansible/opa-routing/policies/` exercises every
-> route — global pause, per-host authorization, hold precedence, approve, investigate
-> (fail-closed baseline), and the default.
+> Offline check (no cluster): `opa test ansible/opa-routing/policies/` exercises every route of
+> all five decision policies — golden-image drift (pause, per-host hold, approve, fail-closed
+> baseline), Tanium drift, AMI meter routing, Mythos score validation and the composed Mythos
+> route — including the malformed-input cases that must never reach an automatic action.
