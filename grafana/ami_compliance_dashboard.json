@@ -1,0 +1,248 @@
+{
+  "title": "AMI Compliance Dashboard",
+  "uid": "ami-compliance-001",
+  "tags": ["ami", "compliance", "utility"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 2,
+  "refresh": "5m",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Overall AMI Compliance",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": 0 },
+              { "color": "yellow", "value": 60 },
+              { "color": "green",  "value": 80 }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [{
+        "rawSql": "SELECT AVG(compliance_percentage) AS value FROM compliance_results WHERE policy_name IN ('AMI NIST IR 7628 Rev 1','AMI Device Compliance','AMI Head-End Security') AND $__timeFilter(evaluation_timestamp)",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Critical Violations (All Utilities)",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "red",    "value": 1 }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [{
+        "rawSql": "SELECT COALESCE(SUM((metadata->>'critical_violations')::int), 0) AS value FROM compliance_results WHERE policy_name = 'AMI Device Compliance' AND $__timeFilter(evaluation_timestamp)",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total Assessments",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": 0 }]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{
+        "rawSql": "SELECT COUNT(*) AS value FROM compliance_results WHERE policy_name IN ('AMI NIST IR 7628 Rev 1','AMI Device Compliance','AMI Head-End Security') AND $__timeFilter(evaluation_timestamp)",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Utilities Fully Compliant",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",   "value": 0 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{
+        "rawSql": "SELECT COUNT(*) AS value FROM (SELECT metadata->>'utility' AS utility FROM compliance_results WHERE policy_name IN ('AMI NIST IR 7628 Rev 1','AMI Device Compliance','AMI Head-End Security') AND $__timeFilter(evaluation_timestamp) GROUP BY metadata->>'utility' HAVING MIN(compliance_percentage) >= 80) sub",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 5,
+      "type": "barchart",
+      "title": "Compliance % by Utility and Framework (Latest)",
+      "gridPos": { "x": 0, "y": 4, "w": 14, "h": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": 0 },
+              { "color": "yellow", "value": 60 },
+              { "color": "green",  "value": 80 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "auto",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "showValue": "always",
+        "xTickLabelRotation": 0,
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "targets": [{
+        "rawSql": "SELECT metadata->>'utility' AS utility, policy_name AS framework, ROUND(compliance_percentage::numeric, 1) AS \"Compliance %\" FROM compliance_results WHERE policy_name IN ('AMI NIST IR 7628 Rev 1','AMI Device Compliance','AMI Head-End Security') AND $__timeFilter(evaluation_timestamp) ORDER BY utility, framework",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "Device Compliance: Compliant Meters per Utility",
+      "gridPos": { "x": 14, "y": 4, "w": 10, "h": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": 0 },
+              { "color": "yellow", "value": 50 },
+              { "color": "green",  "value": 80 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [{
+        "rawSql": "SELECT metadata->>'utility' AS metric, ROUND(((passed_controls::float / NULLIF(total_controls,0)) * 100)::numeric, 1) AS value FROM compliance_results WHERE policy_name = 'AMI Device Compliance' AND $__timeFilter(evaluation_timestamp) ORDER BY metadata->>'utility'",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Compliance Score Trend",
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT evaluation_timestamp AS time, compliance_percentage AS value, metadata->>'utility' || ' — NIST IR 7628' AS metric FROM compliance_results WHERE policy_name = 'AMI NIST IR 7628 Rev 1' AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp",
+          "format": "time_series"
+        },
+        {
+          "rawSql": "SELECT evaluation_timestamp AS time, compliance_percentage AS value, metadata->>'utility' || ' — Device' AS metric FROM compliance_results WHERE policy_name = 'AMI Device Compliance' AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp",
+          "format": "time_series"
+        },
+        {
+          "rawSql": "SELECT evaluation_timestamp AS time, compliance_percentage AS value, metadata->>'utility' || ' — Head-End' AS metric FROM compliance_results WHERE policy_name = 'AMI Head-End Security' AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Latest Assessment Results",
+      "gridPos": { "x": 0, "y": 21, "w": 24, "h": 9 },
+      "fieldConfig": {
+        "defaults": { "custom": { "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "compliance_percentage" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.displayMode", "value": "color-background" },
+              { "id": "thresholds", "value": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red",    "value": 0 },
+                  { "color": "yellow", "value": 60 },
+                  { "color": "green",  "value": 80 }
+                ]
+              }}
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "critical_violations" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background" },
+              { "id": "thresholds", "value": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": 0 },
+                  { "color": "red",   "value": 1 }
+                ]
+              }}
+            ]
+          }
+        ]
+      },
+      "options": { "sortBy": [{ "displayName": "evaluation_timestamp", "desc": true }] },
+      "targets": [{
+        "rawSql": "SELECT id, evaluation_timestamp, metadata->>'utility' AS utility, policy_name AS framework, total_controls, passed_controls, failed_controls, ROUND(compliance_percentage::numeric, 1) AS compliance_percentage, COALESCE((metadata->>'critical_violations')::int, 0) AS critical_violations FROM compliance_results WHERE policy_name IN ('AMI NIST IR 7628 Rev 1','AMI Device Compliance','AMI Head-End Security') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC, utility, framework LIMIT 100",
+        "format": "table"
+      }]
+    }
+  ]
+}

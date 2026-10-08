@@ -1,0 +1,53 @@
+{
+  "name": "AAC - TEST call workflow-template via AO",
+  "edges": [
+    {
+      "to": "call_wf",
+      "from": "trigger_test"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "call_wf",
+      "name": "Call AAP Workflow Template (196)",
+      "type": "aap_workflow_job_template",
+      "position": {
+        "x": 300.0,
+        "y": 300.0
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_hostname": "${trigger.target_hostname}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "organization_name": "Default",
+        "workflow_job_template_name": "AAC_GoldenImage_Enforcement"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trigger_test",
+      "name": "Test",
+      "type": "manual_trigger",
+      "position": {
+        "x": -9,
+        "y": 371
+      },
+      "parameters": {
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "target_hostname": {
+              "type": "string",
+              "default": "demo-rhel9"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "description": "Proof: AO aap_workflow_job_template node launches an AAP WORKFLOW template (AAC_GoldenImage_Enforcement).",
+  "schema_version": "2.0.0"
+}

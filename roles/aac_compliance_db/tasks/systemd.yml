@@ -1,0 +1,31 @@
+---
+# Generate a podman systemd unit for the PostgreSQL container and enable it on boot.
+# Skipped when aac_db_skip_container_deploy is true or aac_db_generate_systemd is false.
+
+- name: Generate systemd unit file for PostgreSQL container
+  command: "podman generate systemd --name {{ aac_db_container_name }} --files --new"
+  args:
+    chdir: /tmp
+  delegate_to: "{{ aac_host }}"
+  changed_when: false
+
+- name: Install systemd unit file
+  command: "mv /tmp/container-{{ aac_db_container_name }}.service /etc/systemd/system/"
+  delegate_to: "{{ aac_host }}"
+  become: true
+  ignore_errors: true
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  delegate_to: "{{ aac_host }}"
+  become: true
+
+- name: Enable and start PostgreSQL container service
+  systemd:
+    name: "container-{{ aac_db_container_name }}.service"
+    enabled: yes
+    state: started
+  delegate_to: "{{ aac_host }}"
+  become: true
+  ignore_errors: true

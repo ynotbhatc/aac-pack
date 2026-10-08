@@ -1,0 +1,107 @@
+---
+# Create the compliance_reader read-only role and grant SELECT on all tables/views.
+#
+# CREATE ROLE needs a connecting user with SUPERUSER or CREATEROLE. In the lab
+# that is `postgres` and this all just works. On a customer install the guide
+# connects as the database owner (e.g. `compliance`), and the RHEL postgresql
+# image does NOT give POSTGRESQL_USER either attribute — so CREATE ROLE fails
+# with "permission denied to create role".
+#
+# That failure used to surface as an unexplained error the install guide told
+# operators to ignore, made worse by `no_log` hiding the message. Ignoring it is
+# not safe: the Portal connects to the compliance database AS compliance_reader,
+# so a missing role is a later, harder-to-diagnose outage rather than a
+# cosmetic install wart. The privilege is therefore checked up front and the
+# remedy stated.
+
+- name: Validate SQL identifiers before they are interpolated into DDL
+  ansible.builtin.assert:
+    that:
+      - aac_db_reader_user is match('^[a-z_][a-z0-9_]{0,62}$')
+      - pg_db is match('^[a-z_][a-z0-9_]{0,62}$')
+    fail_msg: "aac_db_reader_user / pg_db must be plain SQL identifiers (identifiers cannot be bound as parameters)"
+
+- name: Determine whether the connecting role can create roles
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: >-
+      SELECT (rolsuper OR rolcreaterole) AS can_create_roles
+      FROM pg_roles WHERE rolname = current_user
+  register: aac_db_role_capability
+
+- name: Record the capability
+  ansible.builtin.set_fact:
+    aac_db_can_create_roles: >-
+      {{ (aac_db_role_capability.query_result | default([{}]))[0].can_create_roles
+         | default(false) | bool }}
+
+- name: Fail with the remedy when the connecting role cannot create roles
+  ansible.builtin.fail:
+    msg: |
+      Cannot create the read-only role '{{ aac_db_reader_user }}': the connecting
+      user '{{ pg_user }}' has neither SUPERUSER nor CREATEROLE.
+
+      This is not safe to skip. The AAC Customer Portal connects to this database
+      as '{{ aac_db_reader_user }}'; without the role it cannot read compliance
+      results at all.
+
+      Pick one:
+
+        a) Re-run this step connecting as a superuser, e.g.
+             -e "pg_user=postgres" -e "aac_db_password=<postgres password>"
+
+        b) Grant the privilege once, as a superuser, then re-run:
+             ALTER ROLE {{ pg_user }} CREATEROLE;
+
+        c) Create the role by hand, as a superuser, then re-run — the grants
+           below are idempotent:
+             CREATE ROLE {{ aac_db_reader_user }} LOGIN PASSWORD '<password>';
+  when: not aac_db_can_create_roles
+
+- name: Ensure the compliance_reader role exists (module binds name/password safely)
+  community.postgresql.postgresql_user:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    name: "{{ aac_db_reader_user }}"
+    password: "{{ aac_db_reader_password }}"
+    role_attr_flags: LOGIN
+  no_log: true
+
+- name: Grant CONNECT to compliance_reader
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "GRANT CONNECT ON DATABASE {{ pg_db }} TO {{ aac_db_reader_user }}"
+
+- name: Grant SELECT on all tables and views to compliance_reader
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      GRANT USAGE ON SCHEMA public TO {{ aac_db_reader_user }};
+      GRANT SELECT ON ALL TABLES IN SCHEMA public TO {{ aac_db_reader_user }};
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT SELECT ON TABLES TO {{ aac_db_reader_user }}
+
+- name: Grant SELECT on all sequences to compliance_reader
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO {{ aac_db_reader_user }}"
+  failed_when: false

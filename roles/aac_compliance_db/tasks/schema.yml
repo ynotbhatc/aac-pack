@@ -1,0 +1,621 @@
+---
+# Create all AAC compliance tables and views.
+# All DDL uses IF NOT EXISTS / CREATE OR REPLACE — safe to re-run.
+
+# ── compliance_results ─────────────────────────────────────────────────────────
+# Primary storage for OPA evaluation results (written by every assessment playbook).
+
+- name: Create compliance_results table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS compliance_results (
+        id                    SERIAL PRIMARY KEY,
+        hostname              VARCHAR(255),
+        ip_address            VARCHAR(45),
+        framework             VARCHAR(100) NOT NULL,
+        policy_name           VARCHAR(255),
+        policy_version        VARCHAR(100),
+        total_controls        INTEGER,
+        passed_controls       INTEGER,
+        failed_controls       INTEGER,
+        compliance_percentage DECIMAL(5,2),
+        compliant             BOOLEAN,
+        violations            JSONB,
+        metadata              JSONB,
+        evaluation_timestamp  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        facts_id              INTEGER
+      )
+
+- name: Create compliance_results indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_results_hostname   ON compliance_results(hostname)"
+    - "CREATE INDEX IF NOT EXISTS idx_results_framework  ON compliance_results(framework)"
+    - "CREATE INDEX IF NOT EXISTS idx_results_timestamp  ON compliance_results(evaluation_timestamp DESC)"
+    - "CREATE INDEX IF NOT EXISTS idx_results_compliant  ON compliance_results(compliant)"
+  failed_when: false
+
+# ── compliance_facts ───────────────────────────────────────────────────────────
+# Raw Ansible facts stored before OPA evaluation (feeds store_fact_in_db.yml pattern).
+
+- name: Create compliance_facts table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS compliance_facts (
+        id              SERIAL PRIMARY KEY,
+        hostname        VARCHAR(255) NOT NULL,
+        ip_address      VARCHAR(45),
+        framework       VARCHAR(100) NOT NULL,
+        collected_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        collection_job  INTEGER,
+        schema_version  VARCHAR(20) DEFAULT '1.0',
+        facts           JSONB NOT NULL
+      )
+
+- name: Create compliance_facts indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_facts_hostname   ON compliance_facts(hostname)"
+    - "CREATE INDEX IF NOT EXISTS idx_facts_framework  ON compliance_facts(framework)"
+    - "CREATE INDEX IF NOT EXISTS idx_facts_collected  ON compliance_facts(collected_at DESC)"
+    - "CREATE INDEX IF NOT EXISTS idx_facts_gin        ON compliance_facts USING gin(facts)"
+  failed_when: false
+
+# ── host_facts ─────────────────────────────────────────────────────────────────
+# Nightly gather_facts snapshots per host (ADR-001).
+
+- name: Create host_facts table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS host_facts (
+        id              BIGSERIAL PRIMARY KEY,
+        host_id         VARCHAR(255) NOT NULL,
+        hostname        VARCHAR(255),
+        ip_address      VARCHAR(45),
+        os_family       VARCHAR(50),
+        os_distribution VARCHAR(100),
+        os_version      VARCHAR(50),
+        cloud_provider  VARCHAR(50)  DEFAULT 'on_prem',
+        aws_instance_id VARCHAR(50),
+        aws_region      VARCHAR(50),
+        collected_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        collection_job  INTEGER,
+        schema_version  VARCHAR(20)  DEFAULT '1.0',
+        checksum        VARCHAR(64),
+        facts           JSONB NOT NULL
+      )
+
+- name: Create host_facts indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_host_facts_host_id   ON host_facts(host_id)"
+    - "CREATE INDEX IF NOT EXISTS idx_host_facts_collected  ON host_facts(collected_at DESC)"
+    - "CREATE INDEX IF NOT EXISTS idx_host_facts_os         ON host_facts(os_distribution)"
+    - "CREATE INDEX IF NOT EXISTS idx_host_facts_cloud      ON host_facts(cloud_provider)"
+    - "CREATE INDEX IF NOT EXISTS idx_host_facts_facts_gin  ON host_facts USING gin(facts)"
+  failed_when: false
+
+- name: Create host_facts_latest view
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE OR REPLACE VIEW host_facts_latest AS
+        SELECT DISTINCT ON (host_id) *
+        FROM host_facts
+        ORDER BY host_id, collected_at DESC
+
+# ── sidecar_datasets ───────────────────────────────────────────────────────────
+# Organizational context: Digital Sovereignty declarations, NERC-CIP asset records, etc.
+
+- name: Create sidecar_datasets table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS sidecar_datasets (
+        id              BIGSERIAL PRIMARY KEY,
+        sidecar_type    VARCHAR(100) NOT NULL,
+        entity_id       VARCHAR(255) NOT NULL,
+        collected_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        valid_from      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        valid_until     TIMESTAMP WITH TIME ZONE,
+        schema_version  VARCHAR(20) DEFAULT '1.0',
+        source          VARCHAR(50) DEFAULT 'manual',
+        data            JSONB NOT NULL
+      )
+
+- name: Create sidecar_datasets indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_sidecar_type       ON sidecar_datasets(sidecar_type)"
+    - "CREATE INDEX IF NOT EXISTS idx_sidecar_entity     ON sidecar_datasets(entity_id)"
+    - "CREATE INDEX IF NOT EXISTS idx_sidecar_collected  ON sidecar_datasets(collected_at DESC)"
+    - "CREATE INDEX IF NOT EXISTS idx_sidecar_valid      ON sidecar_datasets(valid_from, valid_until)"
+  failed_when: false
+
+- name: Create sidecar_datasets_latest view
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE OR REPLACE VIEW sidecar_datasets_latest AS
+        SELECT DISTINCT ON (sidecar_type, entity_id) *
+        FROM sidecar_datasets
+        ORDER BY sidecar_type, entity_id, collected_at DESC
+
+# ── technical_debt_items ───────────────────────────────────────────────────────
+# One row per scored violation, written by technical_debt_assessment.yml.
+# Drives the heatmap dashboard and AI prioritization prompt.
+
+- name: Create technical_debt_items table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS technical_debt_items (
+        id                  BIGSERIAL PRIMARY KEY,
+        hostname            VARCHAR(255)  NOT NULL,
+        framework           VARCHAR(100)  NOT NULL,
+        violation           TEXT          NOT NULL,
+        debt_category       VARCHAR(50)   NOT NULL,  -- security | compliance | operational
+        severity            VARCHAR(20)   NOT NULL,  -- CRITICAL | HIGH | MEDIUM | LOW
+        complexity          VARCHAR(20)   NOT NULL,  -- quick_win | moderate | complex
+        effort_hours        DECIMAL(6,1)  NOT NULL,
+        priority_score      DECIMAL(8,2)  NOT NULL,
+        debt_age_days       INTEGER       DEFAULT 0,
+        status              VARCHAR(20)   DEFAULT 'open',  -- open | accepted | resolved
+        first_seen          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen           TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        resolved_at         TIMESTAMP WITH TIME ZONE,
+        source_result_id    INTEGER REFERENCES compliance_results(id),
+        metadata            JSONB,
+        CONSTRAINT uq_debt_item UNIQUE (hostname, framework, violation)
+      )
+
+- name: Create technical_debt_items indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_debt_items_hostname   ON technical_debt_items(hostname)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_items_framework  ON technical_debt_items(framework)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_items_category   ON technical_debt_items(debt_category)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_items_severity   ON technical_debt_items(severity)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_items_status     ON technical_debt_items(status)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_items_priority   ON technical_debt_items(priority_score DESC)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_items_last_seen  ON technical_debt_items(last_seen DESC)"
+  failed_when: false
+
+# ── technical_debt_summary ─────────────────────────────────────────────────────
+# Per-host, per-assessment aggregated totals. Grafana reads this for heatmap panels.
+
+- name: Create technical_debt_summary table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS technical_debt_summary (
+        id                    BIGSERIAL PRIMARY KEY,
+        hostname              VARCHAR(255) NOT NULL,
+        assessed_at           TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        total_items           INTEGER      DEFAULT 0,
+        critical_items        INTEGER      DEFAULT 0,
+        high_items            INTEGER      DEFAULT 0,
+        medium_items          INTEGER      DEFAULT 0,
+        low_items             INTEGER      DEFAULT 0,
+        total_effort_hours    DECIMAL(8,1) DEFAULT 0,
+        security_hours        DECIMAL(8,1) DEFAULT 0,
+        compliance_hours      DECIMAL(8,1) DEFAULT 0,
+        operational_hours     DECIMAL(8,1) DEFAULT 0,
+        debt_score                    DECIMAL(10,2) DEFAULT 0,
+        sovereignty_hours             DECIMAL(8,1)  DEFAULT 0,
+        critical_infrastructure_hours DECIMAL(8,1)  DEFAULT 0,
+        frameworks_assessed           JSONB,
+        ai_summary                    TEXT,
+        ai_roadmap                    JSONB,
+        metadata                      JSONB
+      )
+
+- name: Create technical_debt_summary indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_debt_summary_hostname   ON technical_debt_summary(hostname)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_summary_assessed   ON technical_debt_summary(assessed_at DESC)"
+    - "CREATE INDEX IF NOT EXISTS idx_debt_summary_score      ON technical_debt_summary(debt_score DESC)"
+  failed_when: false
+
+- name: Create technical_debt_summary_latest view
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE OR REPLACE VIEW technical_debt_summary_latest AS
+        SELECT DISTINCT ON (hostname) *
+        FROM technical_debt_summary
+        ORDER BY hostname, assessed_at DESC
+
+# ── Migrations — add new columns to existing databases ────────────────────────
+# These ADD COLUMN IF NOT EXISTS statements are safe to run on any version of
+# the schema. They are no-ops if the columns already exist (fresh install).
+
+- name: Add sovereignty and critical_infrastructure columns (migration)
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "ALTER TABLE technical_debt_summary ADD COLUMN IF NOT EXISTS sovereignty_hours             DECIMAL(8,1) DEFAULT 0"
+    - "ALTER TABLE technical_debt_summary ADD COLUMN IF NOT EXISTS critical_infrastructure_hours DECIMAL(8,1) DEFAULT 0"
+  failed_when: false
+
+- name: Add missing columns to compliance_results (migration)
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS hostname              VARCHAR(255)"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS ip_address            VARCHAR(45)"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS framework             VARCHAR(100)"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS policy_name           VARCHAR(255)"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS policy_version        VARCHAR(100)"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS total_controls        INTEGER"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS passed_controls       INTEGER"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS failed_controls       INTEGER"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS compliance_percentage DECIMAL(5,2)"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS compliant             BOOLEAN"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS violations            JSONB"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS metadata              JSONB"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS evaluation_timestamp  TIMESTAMP"
+    - "ALTER TABLE compliance_results ALTER COLUMN evaluation_timestamp SET DEFAULT CURRENT_TIMESTAMP"
+    - "ALTER TABLE compliance_results ADD COLUMN IF NOT EXISTS facts_id              INTEGER"
+    - |
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name   = 'compliance_results'
+            AND column_name  = 'facts_id'
+            AND data_type    = 'bigint'
+        ) THEN
+          ALTER TABLE compliance_results
+            ALTER COLUMN facts_id TYPE INTEGER USING facts_id::INTEGER;
+        END IF;
+      END $$
+  failed_when: false
+
+
+# ── remediation_rates ──────────────────────────────────────────────────────────
+# Per-domain hourly engineer rates for cost estimates. Overrides the hardcoded
+# $185/hr default. OT engineers (critical_infrastructure) cost significantly
+# more than general IT engineers.
+#
+# Default rates seeded on first install:
+#   security=$175, compliance=$195, operational=$125,
+#   critical_infrastructure=$285, sovereignty=$225, technology_lifecycle=$150
+
+- name: Create remediation_rates table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS remediation_rates (
+        tenant_id        VARCHAR(100)  NOT NULL DEFAULT 'default',
+        debt_category    VARCHAR(50)   NOT NULL,
+        hourly_rate_usd  DECIMAL(8,2)  NOT NULL,
+        currency         VARCHAR(10)   DEFAULT 'USD',
+        effective_from   DATE          NOT NULL DEFAULT CURRENT_DATE,
+        notes            TEXT,
+        PRIMARY KEY (tenant_id, debt_category, effective_from)
+      )
+
+- name: Seed default remediation rates
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      -- Normalize any rows seeded with CURRENT_DATE default to the canonical date
+      -- so that the canonical INSERT below hits ON CONFLICT rather than duplicating.
+      UPDATE remediation_rates
+         SET effective_from = DATE '2024-01-01'
+       WHERE tenant_id = 'default'
+         AND effective_from <> DATE '2024-01-01';
+
+      INSERT INTO remediation_rates (tenant_id, debt_category, hourly_rate_usd, effective_from, notes)
+      VALUES
+        ('default', 'security',                  175.00, DATE '2024-01-01', 'General security engineer'),
+        ('default', 'compliance',                195.00, DATE '2024-01-01', 'GRC / regulatory specialist'),
+        ('default', 'operational',               125.00, DATE '2024-01-01', 'SysAdmin / DevOps engineer'),
+        ('default', 'critical_infrastructure',   285.00, DATE '2024-01-01', 'OT / ICS / SCADA specialist'),
+        ('default', 'sovereignty',               225.00, DATE '2024-01-01', 'Privacy / legal engineer'),
+        ('default', 'technology_lifecycle',      150.00, DATE '2024-01-01', 'IT asset management engineer')
+      ON CONFLICT (tenant_id, debt_category, effective_from) DO NOTHING
+
+# ── remediation_budgets ────────────────────────────────────────────────────────
+# Quarterly budget allocations per domain (OT / IT / sovereignty).
+# Enables budget burn-down panels in Grafana.
+
+# ── framework_catalog ─────────────────────────────────────────────────────────
+# One row per loadable OPA policy bundle. Portal reads this to build the picker
+# UI; Load OPA Policies reads it to resolve dir/prefix for each enabled key.
+
+- name: Create framework_catalog table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS framework_catalog (
+        loader_key          VARCHAR(100)  PRIMARY KEY,
+        display_name        TEXT          NOT NULL,
+        domain              VARCHAR(50)   NOT NULL,   -- security | compliance | privacy | ot | governance
+        description         TEXT,
+        opa_container       VARCHAR(20)   NOT NULL,   -- security | compliance | ot
+        opa_keys            JSONB,                    -- atomic opa_framework_map keys this bundle satisfies
+        policy_dir          VARCHAR(255),             -- path relative to policies/ in git checkout
+        policy_count        INTEGER       DEFAULT 0,
+        tags                JSONB,                    -- ["financial","regulatory","eu","cloud"]
+        enabled_by_default  BOOLEAN       DEFAULT true,
+        added_at            TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+
+- name: Create framework_catalog indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_catalog_domain     ON framework_catalog(domain)"
+    - "CREATE INDEX IF NOT EXISTS idx_catalog_container  ON framework_catalog(opa_container)"
+    - "CREATE INDEX IF NOT EXISTS idx_catalog_default    ON framework_catalog(enabled_by_default)"
+  failed_when: false
+
+# ── customer_frameworks ────────────────────────────────────────────────────────
+# Stores enabled framework selections per tenant/environment. The portal writes
+# here; Load OPA Policies reads here when source=database.
+
+- name: Create customer_frameworks table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS customer_frameworks (
+        id            BIGSERIAL PRIMARY KEY,
+        tenant_id     VARCHAR(100)  NOT NULL DEFAULT 'default',
+        loader_key    VARCHAR(100)  NOT NULL REFERENCES framework_catalog(loader_key),
+        enabled       BOOLEAN       NOT NULL DEFAULT true,
+        enabled_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        enabled_by    VARCHAR(255),
+        notes         TEXT,
+        UNIQUE (tenant_id, loader_key)
+      )
+
+- name: Create customer_frameworks indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_customer_fw_tenant   ON customer_frameworks(tenant_id)"
+    - "CREATE INDEX IF NOT EXISTS idx_customer_fw_enabled  ON customer_frameworks(enabled)"
+    - "CREATE INDEX IF NOT EXISTS idx_customer_fw_key      ON customer_frameworks(loader_key)"
+  failed_when: false
+
+# ── remediation_budgets ────────────────────────────────────────────────────────
+# Quarterly budget allocations per domain (OT / IT / sovereignty).
+# Enables budget burn-down panels in Grafana.
+
+- name: Create remediation_budgets table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS remediation_budgets (
+        tenant_id    VARCHAR(100)  NOT NULL DEFAULT 'default',
+        domain       VARCHAR(50)   NOT NULL,
+        period_start DATE          NOT NULL,
+        period_end   DATE          NOT NULL,
+        budget_hours DECIMAL(10,1),
+        budget_usd   DECIMAL(12,2),
+        team_name    TEXT,
+        notes        TEXT,
+        PRIMARY KEY (tenant_id, domain, period_start)
+      )
+
+# ── compliance_certifications ──────────────────────────────────────────────────
+# Certifiable Audit Artifact (CAA) storage. See docs/strategy/AAC_CERTIFIABLE_AUDIT_ARTIFACT_SPEC.md §3.1.
+# Additive to compliance_results — every CAA writer also writes a compliance_results row.
+
+- name: Create compliance_certifications table
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      CREATE TABLE IF NOT EXISTS compliance_certifications (
+        certification_id        UUID PRIMARY KEY,
+        framework               VARCHAR(100) NOT NULL,
+        framework_version       VARCHAR(50),
+        scope                   VARCHAR(20)  NOT NULL,
+        scope_value             TEXT         NOT NULL,
+        period_start            TIMESTAMPTZ  NOT NULL,
+        period_end              TIMESTAMPTZ  NOT NULL,
+        evaluator_aap_job_id    INTEGER      NOT NULL,
+        evaluator_aap_host      VARCHAR(255),
+        policy_library_sha      TEXT         NOT NULL,
+        opa_bundle_revision     VARCHAR(255),
+        input_hash              CHAR(64)     NOT NULL,
+        result                  JSONB        NOT NULL,
+        regulatory_clauses      TEXT[]       NOT NULL DEFAULT '{}',
+        compliance_status       VARCHAR(20)  NOT NULL,
+        severity_summary        JSONB,
+        signature               BYTEA        NOT NULL,
+        signature_algorithm     VARCHAR(50)  NOT NULL,
+        signed_by               VARCHAR(255) NOT NULL,
+        signed_at               TIMESTAMPTZ  NOT NULL,
+        artifact_uri            TEXT,
+        superseded_by           UUID REFERENCES compliance_certifications(certification_id),
+        signed_projection       TEXT,
+        created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+      )
+
+- name: Create compliance_certifications indexes
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "{{ item }}"
+  loop:
+    - "CREATE INDEX IF NOT EXISTS idx_caa_framework_scope     ON compliance_certifications(framework, scope, scope_value)"
+    - "CREATE INDEX IF NOT EXISTS idx_caa_period              ON compliance_certifications(period_start, period_end)"
+    - "CREATE INDEX IF NOT EXISTS idx_caa_evaluator_job       ON compliance_certifications(evaluator_aap_job_id)"
+    - "CREATE INDEX IF NOT EXISTS idx_caa_regulatory_clauses  ON compliance_certifications USING gin(regulatory_clauses)"
+  failed_when: false
+
+# Widen policy_library_sha from VARCHAR(40) to TEXT. Original schema assumed a
+# raw 40-char SHA, but the resolver now emits "project:<40-char-hex>" (48 chars)
+# when it falls back to AAP's parent-repo revision — see aac_store_certification/
+# tasks/main.yml. TEXT keeps future markers open (e.g. "bundle:<sha>",
+# "cosign:<digest>") without additional migrations.
+- name: Widen policy_library_sha column to TEXT (migration)
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      ALTER TABLE compliance_certifications
+        ALTER COLUMN policy_library_sha TYPE TEXT
+  failed_when: false
+
+# signed_projection stores the exact JSON bytes that cosign signed. Without
+# this, verification by an external auditor requires reconstructing the
+# canonical projection from other columns — which is fragile (PG's JSONB
+# round-trip doesn't preserve byte-for-byte formatting, and timestamp
+# serialization can vary). Storing the bytes makes cosign verify-blob a pure
+# lookup: fetch signed_projection + signature, run cosign, done.
+- name: Add signed_projection column (migration)
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      ALTER TABLE compliance_certifications
+        ADD COLUMN IF NOT EXISTS signed_projection TEXT
+  failed_when: false
+
+# ── AI governance decision log ────────────────────────────────────────────────
+# ai_systems / ai_action_log (append-only, trigger-enforced) / ai_approval_requests.
+# Written by the governed MCP server (per-decision) and ai_governance_check.yml.
+
+- name: Create AI governance decision-log schema
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/ai_action_log_schema.sql"

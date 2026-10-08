@@ -1,0 +1,43 @@
+---
+# Deploy the PostgreSQL container on aac_host using podman.
+# Skipped when aac_db_skip_container_deploy is true.
+
+- name: Pull PostgreSQL image
+  command: "podman pull {{ aac_db_image }}"
+  delegate_to: "{{ aac_host }}"
+  changed_when: false
+
+- name: Create compliance_pgdata volume (if not present)
+  command: "podman volume create {{ aac_db_volume }}"
+  delegate_to: "{{ aac_host }}"
+  register: vol_create
+  changed_when: "'already exists' not in vol_create.stderr"
+  failed_when: false
+
+- name: Stop and remove existing PostgreSQL container
+  shell: |
+    podman stop {{ aac_db_container_name }} 2>/dev/null || true
+    podman rm   {{ aac_db_container_name }} 2>/dev/null || true
+  delegate_to: "{{ aac_host }}"
+  changed_when: false
+
+- name: Start PostgreSQL container
+  command: >
+    podman run -d
+    --name {{ aac_db_container_name }}
+    -p {{ aac_db_port }}:5432
+    -e POSTGRESQL_USER={{ aac_db_user }}
+    -e POSTGRESQL_PASSWORD={{ aac_db_password }}
+    -e POSTGRESQL_DATABASE={{ aac_db_name }}
+    -v {{ aac_db_volume }}:/var/lib/pgsql/data
+    --restart=always
+    {{ aac_db_image }}
+  delegate_to: "{{ aac_host }}"
+  no_log: true
+
+- name: Wait for PostgreSQL to accept connections
+  wait_for:
+    host: "{{ aac_host }}"
+    port: "{{ aac_db_port }}"
+    delay: 3
+    timeout: 60

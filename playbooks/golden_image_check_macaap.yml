@@ -1,0 +1,246 @@
+---
+# golden_image_check_macaap.yml
+#
+# Mac-aap-only Golden Image Check.
+# Reads the current state of the monitored golden file from the demo-rhel9 pod
+# in the `aac` namespace via the Kubernetes API (no SSH, no podman), compares it
+# to the approved baseline in PostgreSQL, and reports PASS or FAIL with a clear
+# diff in the AAP job output.
+#
+# By design this play SUCCEEDS whether or not drift is present — it records the
+# result to compliance_results and reports PASS/FAIL in the output. The
+# enforcement workflow (AAC_GoldenImage_Enforcement) wires Check --success-->
+# Rollback --always--> NotifyHelpDesk, so Check must not hard-fail on drift or
+# the remediation nodes would never run.
+#
+# Designed for the mac-aap CRC sandbox. Does NOT touch lab-aap or RHPDS.
+#
+# Required:
+#   - AAP credential type "OpenShift or Kubernetes API Bearer Token" attached
+#     to the job template (provides K8S_AUTH_HOST / K8S_AUTH_API_KEY env vars)
+#   - The aap-demo-runner SA + RBAC must exist in the aac namespace
+#   - A row in golden_image_baselines for hostname=demo-rhel9, is_current=true
+#     whose golden_files[golden_file_key] matches the pod's pristine file
+#
+# Survey/extra_vars:
+#   target_host       — name of the demo target Deployment (default: demo-rhel9)
+#   golden_file_key   — jsonb key in golden_files (default: selinux_config)
+#   golden_file_path  — path of the monitored file in the pod
+#                       (default: /etc/selinux/config)
+
+- name: Golden Image Check (mac-aap) — compare current state to approved baseline
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_host:   "demo-rhel9"
+    target_ns:     "aac"
+    # Which golden file this demo monitors. Defaults to the SELinux config —
+    # the drift target on the CRC demo-rhel9 pod. Override golden_file_key +
+    # golden_file_path to monitor a different file (e.g. sshd_config on the
+    # local mac-aap pod, which is not patched with a writable /etc/selinux).
+    golden_file_key:  "selinux_config"
+    golden_file_path: "/etc/selinux/config"
+    # Default false: the enforcement workflow's FIRST node must succeed even
+    # when it finds drift, so the Rollback + NotifyHelpDesk edges fire.
+    # Set true for the post-remediation VERIFY node, where a still-drifted
+    # system must fail the job so the ticket is NOT closed.
+    fail_on_drift:    false
+    pg_host:       "compliance-db.aac.svc.cluster.local"
+    pg_port:       5432
+    pg_user:       "compliance"
+    pg_db:         "compliance"
+    pg_password:   "{{ compliance_db_password | default('compliance') }}"
+
+  tasks:
+    - name: Banner
+      debug:
+        msg:
+          - "Golden Image Check — mac-aap"
+          - "Target: deploy/{{ target_host }} in namespace {{ target_ns }}"
+          - "Monitoring: {{ golden_file_path }} (baseline key: {{ golden_file_key }})"
+
+    - name: Fetch current golden image baseline from PostgreSQL
+      community.postgresql.postgresql_query:
+        login_host:     "{{ pg_host }}"
+        login_port:     "{{ pg_port }}"
+        login_user:     "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db:             "{{ pg_db }}"
+        query: |
+          SELECT id, baseline_label, captured_at, golden_files
+          FROM golden_image_baselines
+          WHERE hostname = %s AND is_current = true
+          ORDER BY captured_at DESC
+          LIMIT 1
+        positional_args:
+          - "{{ target_host }}"
+      register: golden_result
+
+    - name: Fail if no baseline exists for this host
+      fail:
+        msg: |
+          No current baseline row found in golden_image_baselines for
+          hostname='{{ target_host }}'. Seed one before running the check.
+      when: golden_result.query_result | length == 0
+
+    - name: Extract the baseline content for the monitored file
+      set_fact:
+        baseline_id:      "{{ golden_result.query_result[0].id }}"
+        baseline_label:   "{{ golden_result.query_result[0].baseline_label }}"
+        baseline_when:    "{{ golden_result.query_result[0].captured_at }}"
+        baseline_content: "{{ golden_result.query_result[0].golden_files[golden_file_key] }}"
+
+    - name: Find the running demo-rhel9 pod
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ target_ns }}"
+        label_selectors:
+          - "app={{ target_host }}"
+      register: pods_q
+
+    - name: Fail if no demo-rhel9 pod found
+      fail:
+        msg: |
+          No Running pod found with label app={{ target_host }} in
+          namespace {{ target_ns }}. Apply contrib/mac-aap/manifests/50-demo-rhel9.yaml.
+      when: pods_q.resources | length == 0
+
+    - name: Capture the pod name
+      set_fact:
+        target_pod: "{{ pods_q.resources[0].metadata.name }}"
+
+    - name: Read current {{ golden_file_path }} from {{ target_pod }}
+      kubernetes.core.k8s_exec:
+        namespace: "{{ target_ns }}"
+        pod: "{{ target_pod }}"
+        command: "cat {{ golden_file_path }}"
+      register: current_file
+
+    - name: Compare current vs baseline (trim to ignore trailing-newline noise)
+      set_fact:
+        is_drift_present: "{{ (current_file.stdout | trim) != (baseline_content | trim) }}"
+        current_text:     "{{ current_file.stdout }}"
+
+    # ── Expose the verdict to Automation Orchestrator ────────────────────────
+    # AO reads these as workflow artifacts (${check.artifacts.<key>}) to drive the
+    # agentic triage + switch. Additive and side-effect-free — the PASS/FAIL/DB
+    # behaviour below is unchanged, and the play still succeeds by design.
+    - name: Publish drift verdict as workflow stats (for AO agentic triage)
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          any_drift:          "{{ is_drift_present | bool }}"
+          # Critical = SELinux or the SSH *daemon* (sshd_config). ssh_config is the
+          # client config and is deliberately excluded — only daemon/MAC changes are
+          # treated as critical, matching the NERC CIP-010 baseline framing.
+          critical_drift:     "{{ (is_drift_present | bool) and (golden_file_key in ['selinux_config', 'sshd_config']) }}"
+          changed_files:      "{{ [golden_file_path] if (is_drift_present | bool) else [] }}"
+          # Named baseline_compliant (not opa_compliant): this verdict is a direct
+          # baseline-vs-current comparison, NOT an OPA policy evaluation. Kept
+          # semantically accurate so downstream artifact consumers aren't misled.
+          baseline_compliant: "{{ not (is_drift_present | bool) }}"
+          drifted_key:        "{{ golden_file_key }}"
+
+    # ── PASS path ────────────────────────────────────────────────────────────
+    - name: Report — PASS (no drift)
+      debug:
+        msg:
+          - "═══════════════════════════════════════════════════════"
+          - "  GOLDEN IMAGE CHECK  →  PASS"
+          - "═══════════════════════════════════════════════════════"
+          - "  Target:           deploy/{{ target_host }} ({{ target_pod }})"
+          - "  Baseline:         {{ baseline_label }} (id={{ baseline_id }})"
+          - "  Captured:         {{ baseline_when }}"
+          - "  File:             {{ golden_file_path }}"
+          - "  Current matches baseline. No drift."
+          - "═══════════════════════════════════════════════════════"
+      when: not is_drift_present
+
+    # ── FAIL path ────────────────────────────────────────────────────────────
+    - name: Report — FAIL (drift detected)
+      debug:
+        msg: |
+          ═══════════════════════════════════════════════════════
+            GOLDEN IMAGE CHECK  →  FAIL
+          ═══════════════════════════════════════════════════════
+            Target:           deploy/{{ target_host }} ({{ target_pod }})
+            Baseline:         {{ baseline_label }} (id={{ baseline_id }})
+            Captured:         {{ baseline_when }}
+            File:             {{ golden_file_path }}
+
+            DRIFT DETECTED — {{ golden_file_key }} does not match the approved baseline.
+
+          --- BASELINE (approved) ---
+          {{ baseline_content }}
+
+          --- CURRENT (on live pod) ---
+          {{ current_text }}
+
+          ═══════════════════════════════════════════════════════
+            Next step: run "Golden Image Rollback" to remediate.
+          ═══════════════════════════════════════════════════════
+      when: is_drift_present
+
+    - name: Store result in compliance_results
+      community.postgresql.postgresql_query:
+        login_host:     "{{ pg_host }}"
+        login_port:     "{{ pg_port }}"
+        login_user:     "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db:             "{{ pg_db }}"
+        query: |
+          INSERT INTO compliance_results
+            (hostname, framework, policy_name, policy_version, compliant,
+             total_controls, passed_controls, failed_controls,
+             compliance_percentage, violations, metadata)
+          VALUES
+            (%s, 'golden_image', %s, 'mac-aap-demo-v1', %s,
+             1, %s, %s,
+             %s, %s::jsonb, %s::jsonb)
+        positional_args:
+          - "{{ target_host }}"
+          - "{{ golden_file_key }}_check"
+          - "{{ not is_drift_present }}"
+          - "{{ 1 if not is_drift_present else 0 }}"
+          - "{{ 0 if not is_drift_present else 1 }}"
+          - "{{ 100.00 if not is_drift_present else 0.00 }}"
+          - "{{ ([] if not is_drift_present else [{'control': golden_file_key, 'message': golden_file_path ~ ' drifted from baseline'}]) | to_json }}"
+          - "{{ {'baseline_id': baseline_id, 'baseline_label': baseline_label, 'pod': target_pod, 'file': golden_file_path} | to_json }}"
+
+    # NOTE: by default this play SUCCEEDS even when drift is detected. The
+    # result is recorded above and reported in the output; the enforcement
+    # workflow relies on the first Check succeeding so Rollback +
+    # NotifyHelpDesk run.
+    - name: Drift summary line (job stays green by design)
+      debug:
+        msg: >-
+          Golden Image Check complete — {{ 'DRIFT DETECTED (remediation will run)'
+          if is_drift_present else 'no drift' }}.
+      when: not (fail_on_drift | bool)
+
+    # Verification mode. The post-remediation node runs with fail_on_drift=true
+    # so that a system still off-baseline FAILS the job — which stops the
+    # workflow's --success--> edge and leaves the help desk ticket OPEN.
+    # Closing a ticket while the drift is still present would be worse than
+    # never closing it at all.
+    - name: Verify — fail if drift is still present after remediation
+      ansible.builtin.fail:
+        msg: >-
+          VERIFY FAILED — {{ golden_file_path }} still does not match the approved
+          baseline after remediation. Ticket will remain OPEN for investigation.
+      when:
+        - fail_on_drift | bool
+        - is_drift_present
+
+    - name: Verify — remediation confirmed
+      debug:
+        msg: >-
+          VERIFY PASSED — {{ golden_file_path }} matches the approved baseline.
+          Remediation confirmed; the help desk ticket can be closed.
+      when:
+        - fail_on_drift | bool
+        - not is_drift_present

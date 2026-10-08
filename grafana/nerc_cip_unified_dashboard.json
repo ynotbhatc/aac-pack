@@ -1,0 +1,380 @@
+{
+  "uid": "nerc-cip-unified",
+  "title": "NERC-CIP \u2014 AAC + OpenShift Compliance Operator",
+  "tags": [
+    "nerc-cip",
+    "aac",
+    "compliance-operator",
+    "ot"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 0,
+  "refresh": "5m",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "AAC NERC-CIP Score (CIP-002\u2013013)",
+      "type": "stat",
+      "datasource": null,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT compliance_percentage AS value FROM compliance_results WHERE policy_name = 'NERC CIP' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "datasource": null
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "AAC CIP-015 INSM Score",
+      "type": "stat",
+      "datasource": null,
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT compliance_percentage AS value FROM compliance_results WHERE policy_name = 'NERC CIP-015 INSM' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "datasource": null
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "OpenShift Compliance Operator Score",
+      "type": "stat",
+      "datasource": null,
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT compliance_percentage AS value FROM compliance_results WHERE policy_name = 'OpenShift Compliance Operator \u2014 ocp4-nerc-cip' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "datasource": null
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "OCP CIP-010 Drift Status",
+      "type": "stat",
+      "datasource": null,
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN compliant THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'OpenShift CIP-010 Drift \u2014 ocp4-nerc-cip' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "datasource": null
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DRIFT",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NO DRIFT",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Compliance Score Trend \u2014 AAC vs Compliance Operator",
+      "type": "timeseries",
+      "datasource": null,
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT evaluation_timestamp AS time, policy_name AS metric, compliance_percentage AS value FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM','OpenShift Compliance Operator \u2014 ocp4-nerc-cip') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp",
+          "datasource": null
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Failed Controls Trend",
+      "type": "timeseries",
+      "datasource": null,
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT evaluation_timestamp AS time, policy_name AS metric, failed_controls AS value FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM','OpenShift Compliance Operator \u2014 ocp4-nerc-cip') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp",
+          "datasource": null
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Latest Posture by Source",
+      "type": "table",
+      "datasource": null,
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT DISTINCT ON (policy_name) policy_name AS \"Source\", compliance_percentage AS \"Compliance %\", passed_controls AS \"Passed\", failed_controls AS \"Failed\", compliant AS \"Compliant\", evaluation_timestamp AS \"Last Run\" FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM','OpenShift Compliance Operator \u2014 ocp4-nerc-cip') ORDER BY policy_name, evaluation_timestamp DESC",
+          "datasource": null
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "OpenShift Compliance Operator \u2014 Failing CIP Controls (latest)",
+      "type": "table",
+      "datasource": null,
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT v->>'control' AS \"CIP Control\", v->>'check' AS \"Check\", v->>'severity' AS \"Severity\" FROM (SELECT violations FROM compliance_results WHERE policy_name = 'OpenShift Compliance Operator \u2014 ocp4-nerc-cip' ORDER BY evaluation_timestamp DESC LIMIT 1) x, jsonb_array_elements(x.violations) v",
+          "datasource": null
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Baseline of Record vs Current (CIP-010 R1/R2)",
+      "type": "table",
+      "datasource": null,
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "(SELECT 'Baseline (authorized)' AS \"Snapshot\", total_controls AS \"Checks\", passed_controls AS \"PASS at baseline\", failed_controls AS \"FAIL at baseline\", NULL::int AS \"Drift findings\", NULL::text AS \"Change authorization\", evaluation_timestamp AS \"Captured\" FROM compliance_results WHERE policy_name = 'OpenShift CIP-010 Baseline \u2014 ocp4-nerc-cip' ORDER BY evaluation_timestamp DESC LIMIT 1) UNION ALL (SELECT 'Current vs baseline', total_controls, NULL::int, NULL::int, (jsonb_array_length(COALESCE(metadata->'regressions','[]'::jsonb)) + jsonb_array_length(COALESCE(metadata->'config_drift','[]'::jsonb)) + jsonb_array_length(COALESCE(metadata->'new_failures','[]'::jsonb)))::int, CASE WHEN (jsonb_array_length(COALESCE(metadata->'regressions','[]'::jsonb)) + jsonb_array_length(COALESCE(metadata->'config_drift','[]'::jsonb)) + jsonb_array_length(COALESCE(metadata->'new_failures','[]'::jsonb))) = 0 THEN 'no drift' WHEN COALESCE(metadata->>'change_ticket','') = '' THEN 'UNAUDITED' ELSE metadata->>'change_ticket' END, evaluation_timestamp FROM compliance_results WHERE policy_name = 'OpenShift CIP-010 Drift \u2014 ocp4-nerc-cip' ORDER BY evaluation_timestamp DESC LIMIT 1)",
+          "datasource": null
+        }
+      ]
+    }
+  ]
+}

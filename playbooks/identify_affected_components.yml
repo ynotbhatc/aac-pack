@@ -1,0 +1,344 @@
+---
+# identify_affected_components.yml — catalog-driven CVE → affected systems/components
+#
+# THE CORE AAC CLAIM: identify the SYSTEMS and TECHNOLOGY COMPONENTS that need
+# the patch — from observed inventory, not assumption.
+#
+# Implements `docs/patch_remediation_lifecycle.md` Stage 3 (inventory matching),
+# but sourced from the LOCAL product catalog rather than the Customer Portal.
+#
+# Why this exists alongside pull_patch_worklist.yml:
+#   pull_patch_worklist.yml resolves a manifest the PORTAL has already matched.
+#   This playbook does the matching HERE, against the catalog fact collection
+#   already produces. That matters because it removes the portal from the
+#   identification half entirely — AAC can answer "which of my systems and
+#   components are affected" with no external dependency at all.
+#   Both write patch_worklist; rows are distinguished by host_resolution.
+#
+# FIX VERSION: resolved by LEFT JOIN against cve_vendor_remediations, so a CVE
+# with no remediation row is still reported — you are affected whether or not a
+# fix exists — but carries fix_match='none' rather than a guessed version.
+# A wrong fix version is worse than a missing one.
+#
+#   fix_match='vendor_fix'  a published fix exists and is named
+#   fix_match='none'        no fix is published. Materially different
+#                           from "a fix exists and we have not applied it":
+#                           past end-of-support this is PERMANENT, and it
+#                           is replacement debt, not remediation debt.
+#
+# cve_vendor_remediations is §13 build-sequence #1 and is populated by the CVE
+# feed. For a demo it can be seeded from ansible/files/demo_cve_fixture.sql.
+#
+# Matching is layered, most to least confident:
+#   1. cpe            — catalog CPE appears in the CVE's affected_cpes[]
+#   2. vendor_product — vendor AND product both match
+#   3. product        — product name matches only
+#
+# Version handling is FAIL-CLOSED. A component is reported when its installed
+# version is listed as affected, OR when the CVE carries no version data at all
+# (can't tell → report it). It is excluded only when the CVE states which
+# versions are affected and this host's version is demonstrably not among them.
+#
+# AAP Job Template: "AAC - Identify Affected Components (catalog match)"
+# Credentials: Ansible Vault
+# EE: AAC Compliance EE (community.postgresql)
+# Run after: "AAC - Refresh Inventory Catalog (patch intelligence)"
+
+- name: Identify affected systems and components from the product catalog
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - [ "../vars/vault_secrets.yml", "../vars/empty_fallback.yml" ]
+    - ../vars/site_config.yml
+
+  vars:
+    pg_port: "{{ compliance_db_port | default(5432) }}"
+    pg_db: "compliance"
+    pg_user: "postgres"
+    pg_password: "{{ compliance_db_password }}"
+
+    # Survey: comma-separated CVE IDs, or empty for every CVE currently known
+    cve_filter: "{{ cve_ids | default('') }}"
+    # Report components whose version the CVE explicitly excludes (default: no)
+    include_unaffected_versions: "{{ include_unaffected | default(false) | bool }}"
+    # Refuse to match against inventory older than this
+    max_inventory_age_hours: "{{ max_inventory_age | default(168) | int }}"
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # Guard rails — matching against stale or absent data manufactures false
+    # confidence, which is worse than reporting nothing.
+    # -------------------------------------------------------------------------
+    - name: Check the CVE store and inventory freshness
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          SELECT
+            (SELECT count(*) FROM cve_events_received)                        AS cve_count,
+            (SELECT count(*) FROM installed_inventory)                        AS inventory_rows,
+            (SELECT count(DISTINCT hostname) FROM installed_inventory)        AS hosts,
+            (SELECT count(*) FROM inventory_catalog)                          AS catalog_products,
+            (SELECT ROUND(EXTRACT(EPOCH FROM (now() - max(last_seen_at)))/3600)
+               FROM installed_inventory)                                      AS inventory_age_hours
+      register: preflight
+
+    - name: Set pre-flight facts
+      ansible.builtin.set_fact:
+        pf: "{{ preflight.query_result[0] }}"
+
+    - name: Report what we are matching against
+      ansible.builtin.debug:
+        msg:
+          - "CVEs known locally      : {{ pf.cve_count }}"
+          - "Hosts observed          : {{ pf.hosts }}"
+          - "Installed package rows  : {{ pf.inventory_rows }}"
+          - "Catalog products        : {{ pf.catalog_products }}"
+          - "Inventory age (hours)   : {{ pf.inventory_age_hours | default('never collected') }}"
+
+    - name: Stop when there are no CVEs to match
+      ansible.builtin.fail:
+        msg: >-
+          cve_events_received is empty — there is nothing to match against the catalog.
+          Populate it from the CVE feed (portal `runner all`, the EDA CVE webhook, or a
+          seed fixture for a demo) before running this playbook. Matching an empty CVE
+          set would report zero affected components, which reads as "you are clean"
+          when it actually means "we never looked".
+      when: pf.cve_count | int == 0
+
+    - name: Stop when there is no inventory to match
+      ansible.builtin.fail:
+        msg: >-
+          installed_inventory is empty. Run "AAC - Gather Facts (All Systems)" and then
+          "AAC - Refresh Inventory Catalog (patch intelligence)" first.
+      when: pf.inventory_rows | int == 0
+
+    - name: Refuse to match against stale inventory
+      ansible.builtin.fail:
+        msg: >-
+          Inventory is {{ pf.inventory_age_hours }}h old, beyond the
+          {{ max_inventory_age_hours }}h limit. Identification from stale facts
+          reports components that may already have been patched and misses ones
+          newly installed. Re-run fact collection, or raise max_inventory_age
+          deliberately if you accept that risk.
+      when:
+        - pf.inventory_age_hours is not none
+        - pf.inventory_age_hours | int > max_inventory_age_hours | int
+
+    # -------------------------------------------------------------------------
+    # Clear only OUR rows — the portal path owns its own and must not be touched
+    # -------------------------------------------------------------------------
+    - name: Clear previous catalog-matched work items
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          DELETE FROM patch_worklist
+           WHERE host_resolution = 'catalog_match'
+             AND (%(filter)s = '' OR cve_id = ANY(string_to_array(%(filter)s, ',')))
+        named_args:
+          filter: "{{ cve_filter }}"
+
+    # -------------------------------------------------------------------------
+    # The match itself — CVE × observed inventory
+    # -------------------------------------------------------------------------
+    - name: Match CVEs against observed components and record affected systems
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          WITH scope AS (
+            -- Vendor remediation is LEFT JOINed: a CVE with no remediation row is
+            -- still reported (you are affected whether or not a fix exists), it
+            -- simply carries no fix version. That is the 'support' valley — and
+            -- it is a different problem from a fix you have not applied yet.
+            SELECT c.cve_id, c.severity, c.kev_member, c.vendor, c.product,
+                   c.affected_versions, c.affected_cpes,
+                   r.fix_version, r.vendor AS fix_vendor, r.vendor_advisory_id,
+                   r.patch_url, r.available_at
+              FROM cve_events_received c
+              LEFT JOIN cve_vendor_remediations r ON r.cve_id = c.cve_id
+             WHERE %(filter)s = ''
+                OR c.cve_id = ANY(string_to_array(%(filter)s, ','))
+          ),
+          matched AS (
+            SELECT
+              c.cve_id,
+              c.severity,
+              COALESCE(c.kev_member, false)                       AS kev_member,
+              i.hostname,
+              i.os_family,
+              COALESCE(NULLIF(i.package_vendor, ''), c.vendor)    AS vendor,
+              i.package_name                                      AS product,
+              i.package_version                                   AS installed_version,
+              c.fix_version, c.fix_vendor, c.vendor_advisory_id, c.patch_url,
+              CASE
+                WHEN i.cpe IS NOT NULL AND c.affected_cpes IS NOT NULL
+                     AND i.cpe = ANY(c.affected_cpes)                    THEN 'cpe'
+                WHEN lower(COALESCE(i.package_vendor, '')) = lower(COALESCE(c.vendor, ''))
+                     AND lower(i.package_name) = lower(c.product)        THEN 'vendor_product'
+                ELSE 'product'
+              END                                                 AS match_kind,
+              CASE
+                WHEN c.affected_versions IS NULL
+                     OR cardinality(c.affected_versions) = 0            THEN 'unknown'
+                WHEN i.package_version = ANY(c.affected_versions)       THEN 'affected'
+                ELSE 'not_listed'
+              END                                                 AS version_verdict
+            FROM scope c
+            JOIN installed_inventory i
+              ON (i.cpe IS NOT NULL AND c.affected_cpes IS NOT NULL
+                  AND i.cpe = ANY(c.affected_cpes))
+              OR lower(i.package_name) = lower(c.product)
+          )
+          INSERT INTO patch_worklist (
+            pulled_at, cve_id, severity, kev_member, hostname, os_family,
+            vendor, product, installed_version,
+            fix_vendor, fixed_version, package_manager, install_command,
+            patch_source, host_resolution, fix_match
+          )
+          SELECT
+            now(), cve_id, severity, kev_member, hostname, os_family,
+            vendor, product, installed_version,
+            fix_vendor, fix_version,
+            CASE
+              WHEN os_family ILIKE '%%debian%%' OR os_family ILIKE '%%ubuntu%%' THEN 'apt'
+              WHEN os_family ILIKE '%%suse%%'                                   THEN 'zypper'
+              WHEN os_family ILIKE '%%windows%%'                                THEN 'windows'
+              ELSE 'dnf'
+            END,
+            vendor_advisory_id,
+            'catalog_match',
+            'catalog_match',
+            -- fix_match records HOW the fix was resolved. 'none' means no vendor
+            -- remediation exists for this CVE — you are affected and no fix is
+            -- published. That is materially different from 'not yet applied'.
+            CASE WHEN fix_version IS NOT NULL AND fix_version <> ''
+                 THEN 'vendor_fix' ELSE 'none' END
+          FROM matched
+          WHERE version_verdict IN ('affected', 'unknown')
+             OR %(include_unaffected)s
+        named_args:
+          filter: "{{ cve_filter }}"
+          include_unaffected: "{{ include_unaffected_versions }}"
+      register: match_result
+
+    # -------------------------------------------------------------------------
+    # Read back — what did we actually find
+    # -------------------------------------------------------------------------
+    - name: Summarise affected systems and components
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          SELECT cve_id, severity, kev_member, product,
+                 count(DISTINCT hostname)        AS hosts,
+                 count(DISTINCT installed_version) AS versions,
+                 string_agg(DISTINCT installed_version, ', ' ORDER BY installed_version) AS version_spread
+            FROM patch_worklist
+           WHERE host_resolution = 'catalog_match'
+           GROUP BY 1,2,3,4
+           ORDER BY kev_member DESC, hosts DESC
+      register: summary
+
+    - name: Count the totals
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          SELECT count(*)                       AS work_items,
+                 count(DISTINCT hostname)       AS affected_hosts,
+                 count(DISTINCT cve_id)         AS matched_cves,
+                 count(DISTINCT product)        AS affected_components,
+                 count(*) FILTER (WHERE kev_member) AS kev_items
+            FROM patch_worklist
+           WHERE host_resolution = 'catalog_match'
+      register: totals
+
+    # ── Expose the patch verdict to Automation Orchestrator ──────────────────
+    # AO's agentic triage node reads these as workflow artifacts
+    # (${identify.artifacts.<key>}). Additive and side-effect-free.
+    - name: Verdict rollup for AO agentic triage
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          SELECT
+            count(*)                                                 AS affected_count,
+            count(DISTINCT cve_id)                                   AS affected_cves,
+            bool_or(fix_match = 'vendor_fix')                        AS has_vendor_fix,
+            bool_or(kev_member)                                      AS kev_present,
+            max(CASE severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3
+                              WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END) AS sev_rank
+            FROM patch_worklist
+           WHERE host_resolution = 'catalog_match'
+      register: verdict
+
+    - name: Publish patch verdict as workflow stats (for AO agentic triage)
+      vars:
+        v: "{{ verdict.query_result[0] }}"
+        sev_map: {4: CRITICAL, 3: HIGH, 2: MEDIUM, 1: LOW, 0: NONE}
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          affected_count: "{{ v.affected_count | default(0) | int }}"
+          affected_cves:  "{{ v.affected_cves | default(0) | int }}"
+          has_vendor_fix: "{{ v.has_vendor_fix | default(false) | bool }}"
+          kev_present:    "{{ v.kev_present | default(false) | bool }}"
+          max_severity:   "{{ sev_map[v.sev_rank | default(0) | int] }}"
+          # EOL exposure is resolved by the Refresh Support Status step, not here;
+          # default false so the agent has a well-defined field either way.
+          eol_exposed:    false
+
+    - name: Identification summary
+      vars:
+        t: "{{ totals.query_result[0] }}"
+      ansible.builtin.debug:
+        msg:
+          - "──────────────────────────────────────────────────────────"
+          - "AFFECTED SYSTEMS AND COMPONENTS (catalog-matched)"
+          - "──────────────────────────────────────────────────────────"
+          - "CVEs matched to this estate : {{ t.matched_cves }} of {{ pf.cve_count }} known"
+          - "Affected components         : {{ t.affected_components }}"
+          - "Affected hosts              : {{ t.affected_hosts }} of {{ pf.hosts }} observed"
+          - "Host x component work items : {{ t.work_items }}"
+          - "KEV (actively exploited)    : {{ t.kev_items }}"
+          - "──────────────────────────────────────────────────────────"
+          - "Fix versions are NOT resolved here — vendor remediation"
+          - "enrichment has not run. These rows say WHICH systems and"
+          - "components are affected, not what version fixes them."
+          - "──────────────────────────────────────────────────────────"
+
+    - name: Per-CVE component and version spread
+      ansible.builtin.debug:
+        var: summary.query_result
+
+    - name: Note when nothing matched
+      ansible.builtin.debug:
+        msg: >-
+          No components in this estate matched the {{ pf.cve_count }} known CVEs.
+          That is a legitimate result — but confirm the CVE store actually covers
+          the products you run before reporting it as "not affected".
+      when: totals.query_result[0].work_items | int == 0

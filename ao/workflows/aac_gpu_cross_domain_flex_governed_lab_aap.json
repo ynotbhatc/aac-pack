@@ -1,0 +1,442 @@
+{
+  "name": "AAC - GPU Cross-Domain Flex (governed, lab AAP)",
+  "edges": [
+    {
+      "to": "capture_src_baseline",
+      "from": "trigger_flex"
+    },
+    {
+      "to": "opa_headroom",
+      "from": "capture_src_baseline"
+    },
+    {
+      "to": "route_switch",
+      "from": "opa_headroom"
+    },
+    {
+      "to": "mig_reconfigure",
+      "from": "route_switch",
+      "from_port": "case_0"
+    },
+    {
+      "to": "change_approval",
+      "from": "route_switch",
+      "from_port": "case_1"
+    },
+    {
+      "to": "notify_hold",
+      "from": "route_switch",
+      "from_port": "case_2"
+    },
+    {
+      "to": "mig_evidence",
+      "from": "mig_reconfigure"
+    },
+    {
+      "to": "drain",
+      "from": "change_approval",
+      "from_port": "approved"
+    },
+    {
+      "to": "notify_rejected",
+      "from": "change_approval",
+      "from_port": "rejected"
+    },
+    {
+      "to": "sanitize",
+      "from": "drain"
+    },
+    {
+      "to": "reimage",
+      "from": "sanitize"
+    },
+    {
+      "to": "opa_enter",
+      "from": "reimage"
+    },
+    {
+      "to": "enter_switch",
+      "from": "opa_enter"
+    },
+    {
+      "to": "rejoin",
+      "from": "enter_switch",
+      "from_port": "case_0"
+    },
+    {
+      "to": "notify_rejected",
+      "from": "enter_switch",
+      "from_port": "default"
+    },
+    {
+      "to": "dest_baseline",
+      "from": "rejoin"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "capture_src_baseline",
+      "name": "Capture source CIP-010 baseline + BCSI inventory",
+      "type": "aap_job_template",
+      "position": {
+        "x": -1176.8953788189683,
+        "y": -344.8981239770782
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "source baseline + BCSI captured"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "opa_headroom",
+      "name": "Headroom Decision (OPA)",
+      "type": "http_request",
+      "position": {
+        "x": -871.6137395926285,
+        "y": -400.50867539355363
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/gpuflex/routing/decision",
+        "body": {
+          "input": {
+            "facts": {
+              "mig_capable": "${trigger.mig_capable}",
+              "demand_units": "${trigger.demand_units}",
+              "domain_headroom_units": "${trigger.domain_headroom_units}",
+              "cross_domain_available": "${trigger.cross_domain_available}"
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "route_switch",
+      "name": "Route (MIG-first)",
+      "type": "switch",
+      "position": {
+        "x": -560.0764332288462,
+        "y": -385.457777161938
+      },
+      "parameters": {
+        "cases": [
+          {
+            "port": "case_0",
+            "label": "Tier 1 — MIG (intra-domain)",
+            "condition": "${opa_headroom.body.result.route} == 'tier1_mig'"
+          },
+          {
+            "port": "case_1",
+            "label": "Tier 2 — cross-domain migrate",
+            "condition": "${opa_headroom.body.result.route} == 'tier2_migrate'"
+          },
+          {
+            "port": "case_2",
+            "label": "Hold — no capacity",
+            "condition": "${opa_headroom.body.result.route} == 'hold'"
+          }
+        ],
+        "default_port": "default"
+      }
+    },
+    {
+      "id": "mig_reconfigure",
+      "name": "Tier 1: MIG repartition (no ESP crossing)",
+      "type": "aap_job_template",
+      "position": {
+        "x": -94.53811920927711,
+        "y": -547.23438919967
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "MIG repartition applied intra-domain"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "mig_evidence",
+      "name": "Tier 1: CIP-010 change record + evidence",
+      "type": "aap_job_template",
+      "position": {
+        "x": 308.2115542174164,
+        "y": -815.4361411654805
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "intra-domain CIP-010 change record stored"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "change_approval",
+      "name": "CIP-010 R1 Change Authorization",
+      "type": "approval",
+      "position": {
+        "x": -94.73901542413762,
+        "y": -268.3429849663017
+      },
+      "parameters": {
+        "prompt": "Cross-domain GPU node migration requested: ${trigger.target_hostname} from ${trigger.source_domain} to ${trigger.target_domain}. This crosses the ESP (CIP-011 sanitization + CIP-010 re-baseline). Approve to authorize."
+      }
+    },
+    {
+      "id": "drain",
+      "name": "Tier 2: Cordon + drain node",
+      "type": "aap_job_template",
+      "position": {
+        "x": 306.1015161414411,
+        "y": -495.7406149063338
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "node cordoned and drained"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "sanitize",
+      "name": "Tier 2: Sanitize media (NIST 800-88, CIP-011 R2)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 639.1279698565296,
+        "y": -504.8058848653266
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "media sanitized; attestation captured"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "reimage",
+      "name": "Tier 2: Reimage signed RHCOS",
+      "type": "aap_job_template",
+      "position": {
+        "x": 974.4995654271062,
+        "y": -505.42247078149893
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "reimaged from signed RHCOS; provenance captured"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "opa_enter",
+      "name": "Enter-Destination Gate (OPA)",
+      "type": "http_request",
+      "position": {
+        "x": 1319.5699372124236,
+        "y": -571.0901228268144
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/gpuflex/routing/enter",
+        "body": {
+          "input": {
+            "facts": {
+              "vuln_passed": "${trigger.vuln_passed}",
+              "dest_baseline_clean": "${trigger.dest_baseline_clean}",
+              "reimage_provenance_valid": "${trigger.reimage_provenance_valid}"
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "enter_switch",
+      "name": "Destination Entry",
+      "type": "switch",
+      "position": {
+        "x": 1651.084627990844,
+        "y": -484.0131840835556
+      },
+      "parameters": {
+        "cases": [
+          {
+            "port": "case_0",
+            "label": "Entry allowed",
+            "condition": "${opa_enter.body.result.gate} == 'allow'"
+          }
+        ],
+        "default_port": "default"
+      }
+    },
+    {
+      "id": "rejoin",
+      "name": "Tier 2: Rejoin destination + GPU Operator/MIG reconcile",
+      "type": "aap_job_template",
+      "position": {
+        "x": 2027.7573388084397,
+        "y": -488.45755029564265
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "node rejoined; GPU Operator reconciled MIG"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "dest_baseline",
+      "name": "Tier 2: Destination CIP-010 baseline + vuln + evidence bundle",
+      "type": "aap_job_template",
+      "position": {
+        "x": 2378.6886000993672,
+        "y": -488.49266082115497
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "destination baseline + vuln assessment + evidence bundle stored"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "notify_rejected",
+      "name": "NotifyHelpDesk: authorization/entry denied",
+      "type": "aap_job_template",
+      "position": {
+        "x": 2065.430034403307,
+        "y": -39.989065189226956
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "migration halted — help desk notified"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "notify_hold",
+      "name": "NotifyHelpDesk: no capacity — queued",
+      "type": "aap_job_template",
+      "position": {
+        "x": -108.36073014727458,
+        "y": 39.78287363737101
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "gpu_flex_step": "request queued — help desk notified"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trigger_flex",
+      "name": "GPU Flex Request",
+      "type": "manual_trigger",
+      "position": {
+        "x": -1473.787681424634,
+        "y": -273.56403725973996
+      },
+      "parameters": {
+        "input_schema": {
+          "type": "object",
+          "required": [
+            "target_hostname"
+          ],
+          "properties": {
+            "mig_capable": {
+              "type": "string",
+              "default": "true"
+            },
+            "vuln_passed": {
+              "type": "string",
+              "default": "true"
+            },
+            "demand_units": {
+              "type": "string",
+              "default": "6"
+            },
+            "source_domain": {
+              "type": "string",
+              "default": "enterprise"
+            },
+            "target_domain": {
+              "type": "string",
+              "default": "grid"
+            },
+            "target_hostname": {
+              "type": "string",
+              "default": "gpu-node-01"
+            },
+            "dest_baseline_clean": {
+              "type": "string",
+              "default": "true"
+            },
+            "domain_headroom_units": {
+              "type": "string",
+              "default": "2"
+            },
+            "cross_domain_available": {
+              "type": "string",
+              "default": "true"
+            },
+            "reimage_provenance_valid": {
+              "type": "string",
+              "default": "true"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "description": "MIG-first hybrid: OPA headroom gate routes Tier-1 MIG vs Tier-2 governed cross-domain node migration (approval + enter-gate + CIP evidence).",
+  "schema_version": "2.0.0"
+}

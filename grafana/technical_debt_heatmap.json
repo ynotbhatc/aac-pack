@@ -1,0 +1,2328 @@
+{
+  "title": "AAC Technical Debt Heatmap",
+  "uid": "aac-tech-debt-001",
+  "tags": [
+    "technical-debt",
+    "compliance",
+    "heatmap",
+    "aac"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 3,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Technical Debt Overview",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Open Debt Items",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status = 'open' AND hostname IN ($hostname) AND framework IN ($framework)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Critical Items",
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status = 'open' AND severity = 'CRITICAL' AND hostname IN ($hostname) AND framework IN ($framework)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Total Remediation Hours",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT ROUND(SUM(effort_hours)::numeric, 1) AS value FROM technical_debt_items WHERE status = 'open' AND hostname IN ($hostname) AND framework IN ($framework)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Estimated Cost ($/hr)",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50000
+              },
+              {
+                "color": "red",
+                "value": 200000
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT ROUND(SUM(d.effort_hours * COALESCE(r.hourly_rate_usd, 185))::numeric, 0) AS value\nFROM technical_debt_items d\nLEFT JOIN LATERAL (\n  SELECT hourly_rate_usd\n  FROM remediation_rates\n  WHERE tenant_id = 'default'\n    AND debt_category = d.debt_category\n    AND effective_from <= CURRENT_DATE\n  ORDER BY effective_from DESC LIMIT 1\n) r ON TRUE\nWHERE d.status = 'open'\n  AND d.hostname IN ($hostname)\n  AND d.framework IN ($framework)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Quick Wins Available",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status = 'open' AND complexity = 'quick_win' AND hostname IN ($hostname) AND framework IN ($framework)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Hosts with Critical Debt",
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(DISTINCT hostname) AS value FROM technical_debt_items WHERE status = 'open' AND severity = 'CRITICAL' AND hostname IN ($hostname) AND framework IN ($framework)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "System \u00d7 Category Heatmap",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Debt by System and Category (hours)",
+      "description": "Color intensity = remediation effort hours. Red = highest debt. Use Host/Framework/Category filters above.",
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center",
+            "displayMode": "color-background"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 8
+              },
+              {
+                "color": "orange",
+                "value": 24
+              },
+              {
+                "color": "red",
+                "value": 48
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "hostname"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "auto"
+              },
+              {
+                "id": "custom.align",
+                "value": "left"
+              },
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_hours"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Total (h)"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "security_hours"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Security (h)"
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "compliance_hours"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Compliance (h)"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "operational_hours"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Operational (h)"
+              },
+              {
+                "id": "custom.width",
+                "value": 125
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "critical_count"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Critical"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": 0
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "debt_score"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Priority Score"
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Priority Score",
+            "desc": true
+          }
+        ],
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "security_hours",
+            "compliance_hours",
+            "operational_hours",
+            "total_hours"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT\n  hostname,\n  ROUND(SUM(CASE WHEN debt_category = 'security'                THEN effort_hours ELSE 0 END)::numeric, 1) AS security_hours,\n  ROUND(SUM(CASE WHEN debt_category = 'compliance'              THEN effort_hours ELSE 0 END)::numeric, 1) AS compliance_hours,\n  ROUND(SUM(CASE WHEN debt_category = 'operational'             THEN effort_hours ELSE 0 END)::numeric, 1) AS operational_hours,\n  ROUND(SUM(CASE WHEN debt_category = 'critical_infrastructure' THEN effort_hours ELSE 0 END)::numeric, 1) AS crit_infra_hours,\n  ROUND(SUM(CASE WHEN debt_category = 'sovereignty'             THEN effort_hours ELSE 0 END)::numeric, 1) AS sovereignty_hours,\n  ROUND(SUM(effort_hours)::numeric, 1)  AS total_hours,\n  SUM(CASE WHEN severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_count,\n  ROUND(SUM(priority_score)::numeric, 1) AS debt_score\nFROM technical_debt_items\nWHERE status = 'open'\n  AND hostname IN ($hostname)\n  AND framework IN ($framework)\n  AND ('$category' = 'all' OR debt_category = '$category')\nGROUP BY hostname\nORDER BY debt_score DESC",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Debt Distribution & Trends",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "type": "piechart",
+      "title": "Effort by Category",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 8,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "security"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "compliance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "operational"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT\n  debt_category AS metric,\n  ROUND(SUM(effort_hours)::numeric, 1) AS value\nFROM technical_debt_items\nWHERE status = 'open'\n  AND hostname IN ($hostname)\n  AND framework IN ($framework)\n  AND ('$category' = 'all' OR debt_category = '$category')\nGROUP BY debt_category",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "piechart",
+      "title": "Items by Severity",
+      "gridPos": {
+        "x": 8,
+        "y": 17,
+        "w": 8,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CRITICAL"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "dark-red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HIGH"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MEDIUM"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "LOW"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "pieType": "pie",
+        "displayLabels": [
+          "name",
+          "value"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT severity AS metric, COUNT(*) AS value\nFROM technical_debt_items\nWHERE status = 'open'\n  AND hostname IN ($hostname)\n  AND framework IN ($framework)\n  AND ('$category' = 'all' OR debt_category = '$category')\nGROUP BY severity ORDER BY value DESC",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "bargauge",
+      "title": "Top 10 Systems by Priority Score",
+      "gridPos": {
+        "x": 16,
+        "y": 17,
+        "w": 8,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "displayMode": "gradient",
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT hostname AS metric, ROUND(SUM(priority_score)::numeric, 1) AS value\nFROM technical_debt_items\nWHERE status = 'open'\n  AND hostname IN ($hostname)\n  AND framework IN ($framework)\nGROUP BY hostname ORDER BY value DESC LIMIT 10",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Debt Trend \u2014 Open Items Over Time",
+      "description": "Tracks open debt items by category over time. Declining lines indicate successful remediation.",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 16,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "security"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "compliance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "operational"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT\n  DATE_TRUNC('day', last_seen) AS time,\n  SUM(CASE WHEN debt_category = 'security'    THEN 1 ELSE 0 END) AS security,\n  SUM(CASE WHEN debt_category = 'compliance'  THEN 1 ELSE 0 END) AS compliance,\n  SUM(CASE WHEN debt_category = 'operational' THEN 1 ELSE 0 END) AS operational\nFROM technical_debt_items\nWHERE last_seen BETWEEN $__timeFrom() AND $__timeTo()\n  AND hostname IN ($hostname)\n  AND framework IN ($framework)\n  AND ('$category' = 'all' OR debt_category = '$category')\nGROUP BY 1\nORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Remediation Progress \u2014 Resolved vs New",
+      "description": "New debt items vs. resolved items per day. Goal: resolved > new (net positive trend).",
+      "gridPos": {
+        "x": 16,
+        "y": 26,
+        "w": 8,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "resolved"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "new_items"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT\n  DATE_TRUNC('day', first_seen) AS time,\n  COUNT(*) FILTER (WHERE status = 'open')     AS new_items,\n  COUNT(*) FILTER (WHERE status = 'resolved') AS resolved\nFROM technical_debt_items\nWHERE first_seen BETWEEN $__timeFrom() AND $__timeTo()\n  AND hostname IN ($hostname)\n  AND framework IN ($framework)\nGROUP BY 1\nORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Priority Remediation Backlog",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "type": "table",
+      "title": "Top 25 Remediation Items (sorted by priority)",
+      "description": "Quick wins (green) = under 4 hours. Focus here first for maximum risk reduction per dollar.",
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "severity"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "CRITICAL": {
+                        "color": "dark-red",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "HIGH": {
+                        "color": "orange",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "MEDIUM": {
+                        "color": "yellow",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "LOW": {
+                        "color": "green",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "complexity"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "quick_win": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "moderate": {
+                        "color": "yellow",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "complex": {
+                        "color": "red",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "effort_hours"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "displayName",
+                "value": "Hours"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "est_cost"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "displayName",
+                "value": "Est. Cost"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "priority_score"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "displayName",
+                "value": "Priority"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "hostname"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "framework"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "debt_category"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "displayName",
+                "value": "Category"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Priority",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT\n  tdi.hostname,\n  tdi.framework,\n  tdi.debt_category,\n  tdi.severity,\n  tdi.complexity,\n  tdi.effort_hours,\n  ROUND((tdi.effort_hours * COALESCE(rr.hourly_rate_usd, 185))::numeric, 0) AS est_cost,\n  ROUND(tdi.priority_score::numeric, 1) AS priority_score,\n  LEFT(tdi.violation, 120)              AS violation\nFROM technical_debt_items tdi\nLEFT JOIN LATERAL (\n  SELECT r2.hourly_rate_usd\n  FROM remediation_rates r2\n  WHERE r2.tenant_id = 'default'\n    AND r2.debt_category = tdi.debt_category\n    AND r2.effective_from <= CURRENT_DATE\n  ORDER BY r2.effective_from DESC LIMIT 1\n) rr ON TRUE\nWHERE tdi.status = 'open'\n  AND tdi.hostname IN ($hostname)\n  AND tdi.framework IN ($framework)\n  AND ('$category' = 'all' OR tdi.debt_category = '$category')\nORDER BY tdi.priority_score DESC\nLIMIT 25",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Critical Infrastructure Debt (NERC-CIP & AMI 2.0)",
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "CIP/AMI Open Items",
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status='open' AND debt_category='critical_infrastructure' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "CIP/AMI Remediation Hours",
+      "gridPos": {
+        "x": 6,
+        "y": 49,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 40
+              },
+              {
+                "color": "red",
+                "value": 200
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT ROUND(COALESCE(SUM(effort_hours),0)::numeric,1) AS value FROM technical_debt_items WHERE status='open' AND debt_category='critical_infrastructure' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "Critical CIP/AMI Items",
+      "gridPos": {
+        "x": 12,
+        "y": 49,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status='open' AND debt_category='critical_infrastructure' AND severity='CRITICAL' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "stat",
+      "title": "CIP/AMI Quick Wins",
+      "gridPos": {
+        "x": 18,
+        "y": 49,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status='open' AND debt_category='critical_infrastructure' AND complexity='quick_win' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "type": "bargauge",
+      "title": "NERC-CIP Gap by Standard (Remediation Hours)",
+      "gridPos": {
+        "x": 0,
+        "y": 53,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 8
+              },
+              {
+                "color": "orange",
+                "value": 16
+              },
+              {
+                "color": "red",
+                "value": 32
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "displayMode": "gradient",
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT SPLIT_PART(violation,' ',1) AS metric, ROUND(SUM(effort_hours)::numeric,1) AS value FROM technical_debt_items WHERE status='open' AND framework='nerc_cip' AND hostname IN ($hostname) GROUP BY metric ORDER BY metric",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 46,
+      "type": "bargauge",
+      "title": "AMI 2.0 Gap by Control Family (Remediation Hours)",
+      "gridPos": {
+        "x": 12,
+        "y": 53,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 8
+              },
+              {
+                "color": "orange",
+                "value": 16
+              },
+              {
+                "color": "red",
+                "value": 32
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "displayMode": "gradient",
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT SUBSTRING(violation,1,   CASE WHEN POSITION('-' IN violation)>0   THEN POSITION('-' IN violation)-1 ELSE LENGTH(violation) END) AS metric, ROUND(SUM(effort_hours)::numeric,1) AS value FROM technical_debt_items WHERE status='open' AND framework='ami' AND hostname IN ($hostname) GROUP BY metric ORDER BY metric",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "type": "table",
+      "title": "Top Critical Infrastructure Items (Priority Order)",
+      "gridPos": {
+        "x": 0,
+        "y": 63,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "color-background"
+          }
+        }
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Priority Score",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT hostname, framework, SPLIT_PART(violation,' ',1) AS standard, severity, complexity, ROUND(effort_hours::numeric,1) AS effort_hours, ROUND(priority_score::numeric,2) AS priority_score, SUBSTRING(violation,1,120) AS violation FROM technical_debt_items WHERE status='open' AND debt_category='critical_infrastructure' AND hostname IN ($hostname) ORDER BY priority_score DESC LIMIT 30",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "title": "Digital Sovereignty \u2014 Path to Full Compliance",
+      "gridPos": {
+        "x": 0,
+        "y": 74,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 51,
+      "type": "stat",
+      "title": "Sovereignty Violations",
+      "gridPos": {
+        "x": 0,
+        "y": 75,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status='open' AND debt_category='sovereignty' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 52,
+      "type": "stat",
+      "title": "Sovereignty Gap (Hours to Full Compliance)",
+      "gridPos": {
+        "x": 6,
+        "y": 75,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 40
+              },
+              {
+                "color": "red",
+                "value": 200
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT ROUND(COALESCE(SUM(effort_hours),0)::numeric,1) AS value FROM technical_debt_items WHERE status='open' AND debt_category='sovereignty' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 53,
+      "type": "stat",
+      "title": "Critical Sovereignty Items",
+      "gridPos": {
+        "x": 12,
+        "y": 75,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(*) AS value FROM technical_debt_items WHERE status='open' AND debt_category='sovereignty' AND severity='CRITICAL' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 54,
+      "type": "stat",
+      "title": "Sovereignty Domains Affected",
+      "gridPos": {
+        "x": 18,
+        "y": 75,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 7
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT COUNT(DISTINCT SPLIT_PART(violation,'-',1)) AS value FROM technical_debt_items WHERE status='open' AND debt_category='sovereignty' AND hostname IN ($hostname)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 55,
+      "type": "bargauge",
+      "title": "Sovereignty Gap by Domain (Remediation Hours)",
+      "gridPos": {
+        "x": 0,
+        "y": 79,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 8
+              },
+              {
+                "color": "orange",
+                "value": 16
+              },
+              {
+                "color": "red",
+                "value": 32
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "displayMode": "gradient",
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT SPLIT_PART(violation,'-',1) AS metric, ROUND(SUM(effort_hours)::numeric,1) AS value FROM technical_debt_items WHERE status='open' AND debt_category='sovereignty' AND hostname IN ($hostname) GROUP BY metric ORDER BY value DESC",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 56,
+      "type": "bargauge",
+      "title": "Sovereignty Remediation Hours by System",
+      "gridPos": {
+        "x": 12,
+        "y": 79,
+        "w": 12,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 8
+              },
+              {
+                "color": "orange",
+                "value": 16
+              },
+              {
+                "color": "red",
+                "value": 32
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "displayMode": "gradient",
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT hostname AS metric, ROUND(SUM(effort_hours)::numeric,1) AS value FROM technical_debt_items WHERE status='open' AND debt_category='sovereignty' AND hostname IN ($hostname) GROUP BY hostname ORDER BY value DESC LIMIT 10",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 57,
+      "type": "table",
+      "title": "Path to Full Sovereignty (Priority Order)",
+      "gridPos": {
+        "x": 0,
+        "y": 89,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "color-background"
+          }
+        }
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Priority Score",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT hostname, SPLIT_PART(violation,'-',1) AS domain, severity, complexity, ROUND(effort_hours::numeric,1) AS effort_hours, ROUND(priority_score::numeric,2) AS priority_score, SUBSTRING(violation,1,140) AS violation FROM technical_debt_items WHERE status='open' AND debt_category='sovereignty' AND hostname IN ($hostname) ORDER BY priority_score DESC LIMIT 30",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 99
+      },
+      "id": 60,
+      "title": "OT vs IT Budget \u2014 Remediation Investment",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "aac-compliance-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50000
+              },
+              {
+                "color": "red",
+                "value": 100000
+              }
+            ]
+          },
+          "unit": "currencyUSD",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 100
+      },
+      "id": 61,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(SUM(\n  d.effort_hours * COALESCE(r.hourly_rate_usd, 285)\n)::numeric, 0) AS value\nFROM technical_debt_items d\nLEFT JOIN LATERAL (\n  SELECT hourly_rate_usd FROM remediation_rates\n  WHERE tenant_id = 'default' AND debt_category = d.debt_category\n    AND effective_from <= CURRENT_DATE\n  ORDER BY effective_from DESC LIMIT 1\n) r ON TRUE\nWHERE d.status = 'open'\n  AND d.debt_category = 'critical_infrastructure'\n  AND d.hostname IN ($hostname)",
+          "refId": "A"
+        }
+      ],
+      "title": "OT Remediation Cost (NERC-CIP / AMI)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "aac-compliance-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 100000
+              },
+              {
+                "color": "red",
+                "value": 250000
+              }
+            ]
+          },
+          "unit": "currencyUSD",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 100
+      },
+      "id": 62,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(SUM(\n  d.effort_hours * COALESCE(r.hourly_rate_usd, 175)\n)::numeric, 0) AS value\nFROM technical_debt_items d\nLEFT JOIN LATERAL (\n  SELECT hourly_rate_usd FROM remediation_rates\n  WHERE tenant_id = 'default' AND debt_category = d.debt_category\n    AND effective_from <= CURRENT_DATE\n  ORDER BY effective_from DESC LIMIT 1\n) r ON TRUE\nWHERE d.status = 'open'\n  AND d.debt_category IN ('security','compliance','operational')\n  AND d.hostname IN ($hostname)",
+          "refId": "A"
+        }
+      ],
+      "title": "IT Remediation Cost (Security / Compliance / Ops)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "aac-compliance-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50000
+              },
+              {
+                "color": "red",
+                "value": 150000
+              }
+            ]
+          },
+          "unit": "currencyUSD",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 100
+      },
+      "id": 63,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(SUM(\n  d.effort_hours * COALESCE(r.hourly_rate_usd, 225)\n)::numeric, 0) AS value\nFROM technical_debt_items d\nLEFT JOIN LATERAL (\n  SELECT hourly_rate_usd FROM remediation_rates\n  WHERE tenant_id = 'default' AND debt_category = d.debt_category\n    AND effective_from <= CURRENT_DATE\n  ORDER BY effective_from DESC LIMIT 1\n) r ON TRUE\nWHERE d.status = 'open'\n  AND d.debt_category = 'sovereignty'\n  AND d.hostname IN ($hostname)",
+          "refId": "A"
+        }
+      ],
+      "title": "Sovereignty Remediation Cost",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "aac-compliance-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "currencyUSD",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 80
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 104
+      },
+      "id": 64,
+      "options": {
+        "barWidth": 0.97,
+        "groupWidth": 0.7,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "auto",
+        "xTickLabelRotation": 0
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  CASE\n    WHEN d.debt_category = 'critical_infrastructure' THEN 'OT'\n    WHEN d.debt_category = 'sovereignty'             THEN 'Sovereignty'\n    ELSE 'IT'\n  END AS domain,\n  d.debt_category,\n  ROUND(SUM(d.effort_hours * COALESCE(r.hourly_rate_usd, 185))::numeric, 0) AS estimated_cost\nFROM technical_debt_items d\nLEFT JOIN LATERAL (\n  SELECT hourly_rate_usd FROM remediation_rates\n  WHERE tenant_id = 'default' AND debt_category = d.debt_category\n    AND effective_from <= CURRENT_DATE\n  ORDER BY effective_from DESC LIMIT 1\n) r ON TRUE\nWHERE d.status = 'open'\n  AND d.hostname IN ($hostname)\nGROUP BY 1, 2\nORDER BY 1, estimated_cost DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Remediation Cost by Domain and Category",
+      "type": "barchart"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "hostname",
+        "type": "query",
+        "label": "Host",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "aac-compliance-db"
+        },
+        "query": "SELECT DISTINCT hostname FROM technical_debt_items WHERE status = 'open' ORDER BY hostname",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "framework",
+        "type": "query",
+        "label": "Framework",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "aac-compliance-db"
+        },
+        "query": "SELECT DISTINCT framework FROM technical_debt_items WHERE status = 'open' ORDER BY framework",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "category",
+        "type": "custom",
+        "label": "Category",
+        "options": [
+          {
+            "selected": true,
+            "text": "all",
+            "value": "all"
+          },
+          {
+            "selected": false,
+            "text": "security",
+            "value": "security"
+          },
+          {
+            "selected": false,
+            "text": "compliance",
+            "value": "compliance"
+          },
+          {
+            "selected": false,
+            "text": "operational",
+            "value": "operational"
+          },
+          {
+            "selected": false,
+            "text": "critical_infrastructure",
+            "value": "critical_infrastructure"
+          },
+          {
+            "selected": false,
+            "text": "sovereignty",
+            "value": "sovereignty"
+          }
+        ],
+        "includeAll": true,
+        "allValue": "all",
+        "current": {
+          "selected": true,
+          "text": "all",
+          "value": "all"
+        },
+        "query": "all,security,compliance,operational,critical_infrastructure,sovereignty"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+---
+# Empty fallback for vars_files first-found lists:
+#   vars_files:
+#     - [ "../vars/vault_secrets.yml", "../vars/empty_fallback.yml" ]
+#
+# vault_secrets.yml is gitignored and absent in fresh / customer AAP project
+# checkouts, where credentials are supplied directly in AAP (credentials,
+# inventories, surveys) rather than from a vault file. This file lets a
+# playbook load cleanly when vault_secrets.yml is not present — it defines no
+# variables, so nothing is overridden; the values simply come from AAP instead.

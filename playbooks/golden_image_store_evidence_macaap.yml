@@ -1,0 +1,91 @@
+---
+# golden_image_store_evidence_macaap.yml
+#
+# The evidence finale of the governed-drift AO workflow: write one
+# compliance_results row recording the enforcement outcome — including the
+# governance receipts (policy route, overrode_agent, rollback_verified).
+#
+# FAIL-CLOSED: the row claims compliance ONLY when the outcome is proven —
+# route == compliant (no drift, baseline verdict clean), or a remediation
+# route whose rollback was VERIFIED (rollback_verified from the Rollback
+# job's set_stats). A remediation that was not verified is recorded as
+# NON-compliant, with a violation message. Evidence never claims a
+# remediation that did not provably happen.
+#
+# mac-aap variant: direct INSERT (this tree carries no roles). Rows are
+# UNSIGNED here — metadata records caa_signed:false so nobody mistakes the
+# lab row for the product's cosign-signed CAA path.
+#
+# Survey/extra_vars:
+#   target_host        — Deployment label (default: demo-rhel9)
+#   framework          — compliance_results.framework (default: nerc_cip_ocp)
+#   route              — policy route: compliant | auto_remediate | approve_remediate
+#   overrode_agent     — did policy override the agent's recommendation (bool)
+#   rollback_verified  — Rollback job's verified outcome (bool; fail-closed)
+
+- name: Store governed-drift enforcement evidence (mac-aap)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_host:       "demo-rhel9"
+    framework:         "nerc_cip_ocp"
+    route:             "compliant"
+    overrode_agent:    false
+    rollback_verified: false
+    pg_host:       "compliance-db.aac.svc.cluster.local"
+    pg_port:       5432
+    pg_user:       "compliance"
+    pg_db:         "compliance"
+    pg_password:   "{{ compliance_db_password | default('compliance') }}"
+
+    _remediation_route: "{{ route in ['auto_remediate', 'approve_remediate'] }}"
+    _at_baseline: >-
+      {{ (route == 'compliant') or
+         (_remediation_route | bool and rollback_verified | bool) }}
+    _violations: >-
+      {{ [] if _at_baseline | bool else
+         ['CIP-010 baseline: drift detected and remediation NOT verified (route=' ~ route ~
+          ', rollback_verified=' ~ (rollback_verified | bool) ~ ')'] }}
+
+  tasks:
+    - name: Record the enforcement outcome
+      community.postgresql.postgresql_query:
+        login_host:     "{{ pg_host }}"
+        login_port:     "{{ pg_port }}"
+        login_user:     "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db:             "{{ pg_db }}"
+        query: |
+          INSERT INTO compliance_results
+            (hostname, framework, policy_name, policy_version,
+             total_controls, passed_controls, failed_controls,
+             compliance_percentage, compliant, violations, metadata)
+          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
+          RETURNING id, evaluation_timestamp
+        positional_args:
+          - "{{ target_host }}"
+          - "{{ framework }}"
+          - "AAC Golden Image (CIP-010) — AO governed enforcement"
+          - "golden-image-ao"
+          - 1
+          - "{{ 1 if _at_baseline | bool else 0 }}"
+          - "{{ 0 if _at_baseline | bool else 1 }}"
+          - "{{ 100.0 if _at_baseline | bool else 0.0 }}"
+          - "{{ _at_baseline | bool }}"
+          - "{{ _violations | to_json }}"
+          - "{{ {'enforcement': 'automation_orchestrator',
+                 'route': route,
+                 'overrode_agent': overrode_agent | bool,
+                 'rollback_verified': rollback_verified | bool,
+                 'baseline_restored': _at_baseline | bool,
+                 'caa_signed': false} | to_json }}"
+      register: evidence_row
+
+    - name: Evidence stored
+      debug:
+        msg:
+          - "Evidence row {{ evidence_row.query_result[0].id }} written for {{ target_host }} ({{ framework }})."
+          - "  Route: {{ route }} | overrode_agent: {{ overrode_agent | bool }} | rollback verified: {{ rollback_verified | bool }}"
+          - "  {{ 'COMPLIANT row recorded.' if _at_baseline | bool else 'NON-COMPLIANT row recorded — remediation unverified; the evidence says so.' }}"

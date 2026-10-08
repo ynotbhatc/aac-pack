@@ -1,0 +1,1105 @@
+{
+  "title": "AAC Infrastructure Compliance",
+  "uid": "aac-compliance-001",
+  "tags": [
+    "cis",
+    "compliance",
+    "infrastructure",
+    "aac"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Overall Infrastructure Compliance",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT AVG(compliance_percentage) AS value FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND $__timeFilter(evaluation_timestamp)",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "High Severity Violations",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(SUM((metadata->>'high_severity_count')::int), 0) AS value FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND $__timeFilter(evaluation_timestamp)",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Systems Assessed",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(DISTINCT hostname) AS value FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND hostname != '' AND $__timeFilter(evaluation_timestamp)",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Fully Compliant (\u226580%)",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS value FROM (SELECT hostname FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND hostname != '' AND $__timeFilter(evaluation_timestamp) GROUP BY hostname HAVING MIN(compliance_percentage) >= 80) sub",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 5,
+      "type": "barchart",
+      "title": "Compliance % by Host (Latest)",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 14,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "auto",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "showValue": "always",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT hostname AS benchmark, ROUND(AVG(compliance_percentage)::numeric, 1) AS \"Compliance %\" FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND hostname != '' AND $__timeFilter(evaluation_timestamp) GROUP BY hostname ORDER BY hostname",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "Controls Passed vs Failed (Latest per Host)",
+      "gridPos": {
+        "x": 14,
+        "y": 4,
+        "w": 10,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "auto",
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT hostname AS metric, ROUND(AVG(compliance_percentage)::numeric, 1) AS value FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND hostname != '' AND $__timeFilter(evaluation_timestamp) GROUP BY hostname ORDER BY hostname",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Compliance Score Trend by Benchmark",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT evaluation_timestamp AS time, compliance_percentage AS value, policy_name AS metric FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "All CIS Assessment Results",
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "compliance_percentage"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 70
+                    },
+                    {
+                      "color": "green",
+                      "value": 80
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "high_severity"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 10
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "evaluation_timestamp",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT id, hostname, evaluation_timestamp, policy_name AS benchmark, total_controls, passed_controls, failed_controls, ROUND(compliance_percentage::numeric, 1) AS compliance_percentage, COALESCE((metadata->>'high_severity_count')::int, 0) AS high_severity, COALESCE((metadata->>'medium_severity_count')::int, 0) AS medium_severity FROM compliance_results WHERE (policy_name ILIKE 'CIS%' OR policy_name ILIKE 'cis_m365_v7%') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC LIMIT 100",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Sentinel Policy Scan Results",
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "compliance_percentage"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": 0
+                    },
+                    {
+                      "color": "green",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "evaluation_timestamp",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT id, evaluation_timestamp, policy_name AS playbook, total_controls, passed_controls, failed_controls, ROUND(compliance_percentage::numeric, 1) AS compliance_percentage FROM compliance_results WHERE policy_name LIKE 'sentinel%' AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC LIMIT 50",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Network Device Compliance",
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "VyOS Router \u2014 Compliance",
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ROUND(compliance_percentage::numeric, 1) AS value FROM compliance_results WHERE policy_name = 'CIS VyOS Router' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "OPNsense Firewall \u2014 Compliance",
+      "gridPos": {
+        "x": 6,
+        "y": 37,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ROUND(compliance_percentage::numeric, 1) AS value FROM compliance_results WHERE policy_name = 'CIS pfSense Firewall' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "VyOS \u2014 Violations",
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT failed_controls AS value FROM compliance_results WHERE policy_name = 'CIS VyOS Router' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "OPNsense \u2014 Violations",
+      "gridPos": {
+        "x": 18,
+        "y": 37,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT failed_controls AS value FROM compliance_results WHERE policy_name = 'CIS pfSense Firewall' ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 15,
+      "type": "barchart",
+      "title": "Network Device CIS Compliance (Latest)",
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          },
+          "custom": {
+            "displayMode": "color-background"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "showValue": "always",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT policy_name AS device, ROUND(compliance_percentage::numeric, 1) AS \"Compliance %\" FROM compliance_results WHERE policy_name IN ('CIS VyOS Router', 'CIS pfSense Firewall') AND id IN (SELECT MAX(id) FROM compliance_results WHERE policy_name IN ('CIS VyOS Router', 'CIS pfSense Firewall') GROUP BY policy_name) ORDER BY policy_name",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 16,
+      "type": "gauge",
+      "title": "Network Device Controls: Pass vs Fail",
+      "gridPos": {
+        "x": 12,
+        "y": 41,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "auto",
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT policy_name AS metric, ROUND(compliance_percentage::numeric, 1) AS value FROM compliance_results WHERE policy_name IN ('CIS VyOS Router', 'CIS pfSense Firewall') AND id IN (SELECT MAX(id) FROM compliance_results WHERE policy_name IN ('CIS VyOS Router', 'CIS pfSense Firewall') GROUP BY policy_name) ORDER BY policy_name",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Network Device Compliance Trend",
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 24,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "spanNulls": false
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT evaluation_timestamp AS time, compliance_percentage AS value, policy_name AS metric FROM compliance_results WHERE policy_name IN ('CIS VyOS Router', 'CIS pfSense Firewall') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp",
+          "format": "time_series",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    },
+    {
+      "id": 18,
+      "type": "table",
+      "title": "Network Device Assessment Results",
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "compliance_percentage"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 70
+                    },
+                    {
+                      "color": "green",
+                      "value": 80
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed_controls"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "evaluation_timestamp",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT evaluation_timestamp, policy_name AS device, COALESCE(metadata->>'platform', 'network') AS platform, COALESCE(metadata->>'device_type', '') AS type, COALESCE(metadata->>'version', '') AS version, total_controls, passed_controls, failed_controls, ROUND(compliance_percentage::numeric, 1) AS compliance_percentage FROM compliance_results WHERE policy_name IN ('CIS VyOS Router', 'CIS pfSense Firewall') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC LIMIT 50",
+          "format": "table",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          }
+        }
+      ],
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "aac-compliance-db"
+      }
+    }
+  ]
+}

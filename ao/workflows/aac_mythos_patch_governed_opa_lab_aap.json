@@ -1,0 +1,672 @@
+{
+  "name": "AAC - Mythos Patch (governed + OPA, lab AAP)",
+  "edges": [
+    {
+      "to": "identify",
+      "from": "trigger_patch"
+    },
+    {
+      "to": "patch_auto",
+      "from": "route_switch",
+      "from_port": "case_0"
+    },
+    {
+      "to": "approval_patch",
+      "from": "route_switch",
+      "from_port": "case_1"
+    },
+    {
+      "to": "patch_approved",
+      "from": "approval_patch",
+      "from_port": "approved"
+    },
+    {
+      "to": "heatmap",
+      "from": "route_switch",
+      "from_port": "case_2"
+    },
+    {
+      "to": "notify_rejected",
+      "from": "approval_patch",
+      "from_port": "rejected"
+    },
+    {
+      "to": "agent_blast_radius",
+      "from": "identify"
+    },
+    {
+      "to": "gate_blast_radius",
+      "from": "agent_blast_radius"
+    },
+    {
+      "to": "converge_scores",
+      "from": "gate_blast_radius"
+    },
+    {
+      "to": "agent_patch_known_state",
+      "from": "identify"
+    },
+    {
+      "to": "gate_patch_known_state",
+      "from": "agent_patch_known_state"
+    },
+    {
+      "to": "converge_scores",
+      "from": "gate_patch_known_state"
+    },
+    {
+      "to": "agent_environment",
+      "from": "identify"
+    },
+    {
+      "to": "gate_environment",
+      "from": "agent_environment"
+    },
+    {
+      "to": "converge_scores",
+      "from": "gate_environment"
+    },
+    {
+      "to": "agent_tech_debt",
+      "from": "identify"
+    },
+    {
+      "to": "gate_tech_debt",
+      "from": "agent_tech_debt"
+    },
+    {
+      "to": "converge_scores",
+      "from": "gate_tech_debt"
+    },
+    {
+      "to": "final_gate",
+      "from": "converge_scores"
+    },
+    {
+      "to": "route_switch",
+      "from": "final_gate"
+    },
+    {
+      "to": "record_decision",
+      "from": "final_gate"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "identify",
+      "name": "AAC - Identify Affected Components (catalog match)",
+      "type": "aap_job_template",
+      "position": {
+        "x": -61.20239646597202,
+        "y": -267.01613642684185
+      },
+      "parameters": {
+        "extra_vars": {
+          "cve_ids": "${trigger.cve_ids}",
+          "max_inventory_age": "100000"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC - Identify Affected Components (catalog match)",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "route_switch",
+      "name": "Route on verdict",
+      "type": "switch",
+      "position": {
+        "x": 1520.0383525335274,
+        "y": -22.27461293105739
+      },
+      "parameters": {
+        "cases": [
+          {
+            "port": "case_0",
+            "label": "Auto-patch",
+            "condition": "${final_gate.body.result.route} == 'auto'"
+          },
+          {
+            "port": "case_1",
+            "label": "Approval required",
+            "condition": "${final_gate.body.result.route} == 'approve'"
+          },
+          {
+            "port": "case_2",
+            "label": "Investigate",
+            "condition": "${final_gate.body.result.route} == 'investigate'"
+          }
+        ],
+        "default_port": "default"
+      }
+    },
+    {
+      "id": "patch_auto",
+      "name": "AAC - Mythos Patch Lifecycle",
+      "type": "aap_workflow_job_template",
+      "position": {
+        "x": 1847.3955019550933,
+        "y": -344.6642914342866
+      },
+      "parameters": {
+        "extra_vars": {
+          "cve_ids": "${trigger.cve_ids}",
+          "dry_run": "${trigger.dry_run}",
+          "target_hostname": "${trigger.target_hostname}",
+          "allow_in_service_patch": "true"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "organization_name": "Default",
+        "workflow_job_template_name": "AAC - Mythos Patch Lifecycle"
+      }
+    },
+    {
+      "id": "approval_patch",
+      "name": "Approve production patch",
+      "type": "approval",
+      "position": {
+        "x": 1882.8669161180371,
+        "y": -9.269747088446927
+      },
+      "parameters": {
+        "prompt": "AI triage flagged a critical/production patch. Review and approve to proceed."
+      }
+    },
+    {
+      "id": "patch_approved",
+      "name": "AAC - Mythos Patch Lifecycle",
+      "type": "aap_workflow_job_template",
+      "position": {
+        "x": 2212.6511160603486,
+        "y": 154.588007999497
+      },
+      "parameters": {
+        "extra_vars": {
+          "cve_ids": "${trigger.cve_ids}",
+          "dry_run": "${trigger.dry_run}",
+          "target_hostname": "${trigger.target_hostname}",
+          "allow_in_service_patch": "true"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "organization_name": "Default",
+        "workflow_job_template_name": "AAC - Mythos Patch Lifecycle"
+      }
+    },
+    {
+      "id": "heatmap",
+      "name": "AAC - Simulate Patch Risk and Heat Map",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1857.596440866876,
+        "y": 620.8894315383953
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_hostname": "${trigger.target_hostname}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC - Simulate Patch Risk and Heat Map",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "notify_rejected",
+      "name": "Notify Help Desk (patch rejected)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 2180.7941172882447,
+        "y": 450.3267693888823
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "ticket_status": "PATCH_REJECTED_MANUAL_REVIEW"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "agent_blast_radius",
+      "name": "Agent: Blast Radius",
+      "type": "agentic",
+      "position": {
+        "x": 272.79593455966744,
+        "y": -423.5716338942258
+      },
+      "parameters": {
+        "prompt": "You measure ONE dimension of patch risk: BLAST RADIUS — how many systems, in which environments, a patch of the in-scope CVEs would touch. Facts from Identify: affected_count=${identify.artifacts.affected_count}, affected_cves=${identify.artifacts.affected_cves}, max_severity=${identify.artifacts.max_severity}, kev_present=${identify.artifacts.kev_present}, has_vendor_fix=${identify.artifacts.has_vendor_fix}, eol_exposed=${identify.artifacts.eol_exposed}. Target host: ${trigger.target_hostname}. CVEs in scope: ${trigger.cve_ids}. Use ONLY these read-only AAP MCP tools: api_hosts_read, api_hosts_list, api_hosts_groups_list, api_groups_read, api_groups_list, api_inventories_read, api_inventories_list — do NOT request host variable data (it is denied by governance policy and you do not need it; classify from inventory names, group names and membership) to establish how widely the target host's group/environment spreads. impact = size x spread of the affected estate; importance = how critical what sits inside that spread is. Return JSON only: {impact, importance, reasons, confidence}. Both scores 0-100. impact = how severe the consequences in YOUR dimension are; importance = how much weight your dimension deserves in THIS decision given the context. You do NOT classify risk — a policy engine derives the risk band from your two scores; report measurements, not conclusions. reasons: specific factual reasons joined by '; '. confidence 0-1 reflecting how much real data you had (thin data means low confidence; never invent facts).",
+        "llm_model_id": "c3120842-0fad-498e-871a-0ff4488f601f",
+        "credential_id": "72fd4b39-eea4-433d-baa3-7f5c70fe97f0",
+        "response_schema": {
+          "type": "object",
+          "required": [
+            "impact",
+            "importance",
+            "reasons",
+            "confidence"
+          ],
+          "properties": {
+            "impact": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How severe the consequences in this dimension are"
+            },
+            "reasons": {
+              "type": "string",
+              "description": "Specific factual reasons, '; '-joined"
+            },
+            "confidence": {
+              "type": "number",
+              "maximum": 1,
+              "minimum": 0
+            },
+            "importance": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How much weight this dimension deserves in this decision"
+            }
+          }
+        },
+        "integration_connections": [
+          {
+            "credential_id": "8044f524-4dfe-48e2-a7d4-a0ae8ad5b13a",
+            "integration_id": "f3dbc4a4-0cc4-4527-a376-a766917ea2ce"
+          }
+        ],
+        "tool_selection_strategy": "ALL"
+      }
+    },
+    {
+      "id": "gate_blast_radius",
+      "name": "Validate: blast_radius",
+      "type": "http_request",
+      "position": {
+        "x": 698.1012276305961,
+        "y": -561.0799845266611
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/mythos/scoring/validate",
+        "body": {
+          "input": {
+            "agent": "blast_radius",
+            "assessment": {
+              "impact": "${agent_blast_radius.result.content.impact}",
+              "reasons": "${agent_blast_radius.result.content.reasons}",
+              "confidence": "${agent_blast_radius.result.content.confidence}",
+              "importance": "${agent_blast_radius.result.content.importance}"
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "agent_patch_known_state",
+      "name": "Agent: Patch Known-State",
+      "type": "agentic",
+      "position": {
+        "x": 267.66768727091653,
+        "y": -120.26025868627677
+      },
+      "parameters": {
+        "prompt": "You measure ONE dimension of patch risk: the KNOWN STATE of the patch itself — vendor track record, known issues with these updates, anything about the fix that argues caution. Facts from Identify: affected_count=${identify.artifacts.affected_count}, affected_cves=${identify.artifacts.affected_cves}, max_severity=${identify.artifacts.max_severity}, kev_present=${identify.artifacts.kev_present}, has_vendor_fix=${identify.artifacts.has_vendor_fix}, eol_exposed=${identify.artifacts.eol_exposed}. Target host: ${trigger.target_hostname}. CVEs in scope: ${trigger.cve_ids}. You have NO internet access and no external feeds in this environment: reason only from the vendor/package/fix facts given, state that limitation in reasons, and keep confidence low (<=0.5) when the signal is thin. Never invent vendor incidents. impact = severity of the patch problems you can substantiate; importance = how strong and relevant that signal is here. Return JSON only: {impact, importance, reasons, confidence}. Both scores 0-100. impact = how severe the consequences in YOUR dimension are; importance = how much weight your dimension deserves in THIS decision given the context. You do NOT classify risk — a policy engine derives the risk band from your two scores; report measurements, not conclusions. reasons: specific factual reasons joined by '; '. confidence 0-1 reflecting how much real data you had (thin data means low confidence; never invent facts).",
+        "llm_model_id": "e4beb455-f11a-4dd2-a873-283a7b524b72",
+        "credential_id": "72fd4b39-eea4-433d-baa3-7f5c70fe97f0",
+        "response_schema": {
+          "type": "object",
+          "required": [
+            "impact",
+            "importance",
+            "reasons",
+            "confidence"
+          ],
+          "properties": {
+            "impact": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How severe the consequences in this dimension are"
+            },
+            "reasons": {
+              "type": "string",
+              "description": "Specific factual reasons, '; '-joined"
+            },
+            "confidence": {
+              "type": "number",
+              "maximum": 1,
+              "minimum": 0
+            },
+            "importance": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How much weight this dimension deserves in this decision"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "gate_patch_known_state",
+      "name": "Validate: patch_known_state",
+      "type": "http_request",
+      "position": {
+        "x": 698.3481345739802,
+        "y": -183.5471161840702
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/mythos/scoring/validate",
+        "body": {
+          "input": {
+            "agent": "patch_known_state",
+            "assessment": {
+              "impact": "${agent_patch_known_state.result.content.impact}",
+              "reasons": "${agent_patch_known_state.result.content.reasons}",
+              "confidence": "${agent_patch_known_state.result.content.confidence}",
+              "importance": "${agent_patch_known_state.result.content.importance}"
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "agent_environment",
+      "name": "Agent: Environment & Readiness",
+      "type": "agentic",
+      "position": {
+        "x": 273.1932123671738,
+        "y": 153.93392663637414
+      },
+      "parameters": {
+        "prompt": "You measure ONE dimension of patch risk: the ENVIRONMENT of the systems to be patched — production or critical classification, business-period sensitivity, support-staff readiness, and RECOVERABILITY (this pipeline takes a pre-change backup and drains the host; dry_run=${trigger.dry_run}). Use ONLY these read-only AAP MCP tools to classify the target host: api_hosts_read, api_hosts_list, api_hosts_groups_list, api_groups_read, api_groups_list, api_inventories_read, api_inventories_list — do NOT request host variable data (denied by governance policy; classify from inventory names, group names and membership). Where business-calendar or staffing data is unavailable, say so in reasons and reflect it in confidence rather than guessing. impact = consequence of a failed change in this environment; importance = how sensitive the timing and readiness context is. Return JSON only: {impact, importance, reasons, confidence}. Both scores 0-100. impact = how severe the consequences in YOUR dimension are; importance = how much weight your dimension deserves in THIS decision given the context. You do NOT classify risk — a policy engine derives the risk band from your two scores; report measurements, not conclusions. reasons: specific factual reasons joined by '; '. confidence 0-1 reflecting how much real data you had (thin data means low confidence; never invent facts).",
+        "llm_model_id": "c3120842-0fad-498e-871a-0ff4488f601f",
+        "credential_id": "72fd4b39-eea4-433d-baa3-7f5c70fe97f0",
+        "response_schema": {
+          "type": "object",
+          "required": [
+            "impact",
+            "importance",
+            "reasons",
+            "confidence"
+          ],
+          "properties": {
+            "impact": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How severe the consequences in this dimension are"
+            },
+            "reasons": {
+              "type": "string",
+              "description": "Specific factual reasons, '; '-joined"
+            },
+            "confidence": {
+              "type": "number",
+              "maximum": 1,
+              "minimum": 0
+            },
+            "importance": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How much weight this dimension deserves in this decision"
+            }
+          }
+        },
+        "integration_connections": [
+          {
+            "credential_id": "8044f524-4dfe-48e2-a7d4-a0ae8ad5b13a",
+            "integration_id": "f3dbc4a4-0cc4-4527-a376-a766917ea2ce"
+          }
+        ],
+        "tool_selection_strategy": "ALL"
+      }
+    },
+    {
+      "id": "gate_environment",
+      "name": "Validate: environment",
+      "type": "http_request",
+      "position": {
+        "x": 707.6157587963241,
+        "y": 237.28505720344683
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/mythos/scoring/validate",
+        "body": {
+          "input": {
+            "agent": "environment",
+            "assessment": {
+              "impact": "${agent_environment.result.content.impact}",
+              "reasons": "${agent_environment.result.content.reasons}",
+              "confidence": "${agent_environment.result.content.confidence}",
+              "importance": "${agent_environment.result.content.importance}"
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "agent_tech_debt",
+      "name": "Agent: Technical Debt",
+      "type": "agentic",
+      "position": {
+        "x": 259.5107335452798,
+        "y": 466.8673026441675
+      },
+      "parameters": {
+        "prompt": "You measure ONE dimension of patch risk: TECHNICAL DEBT of the affected product/systems — proximity to end of support (eol_exposed above), debt from critical-only patching (version lag between installed and fix versions), features foregone, potential dependent services. Dependency topology data is not available here — state that in reasons. Facts from Identify: affected_count=${identify.artifacts.affected_count}, affected_cves=${identify.artifacts.affected_cves}, max_severity=${identify.artifacts.max_severity}, kev_present=${identify.artifacts.kev_present}, has_vendor_fix=${identify.artifacts.has_vendor_fix}, eol_exposed=${identify.artifacts.eol_exposed}. Target host: ${trigger.target_hostname}. CVEs in scope: ${trigger.cve_ids}. impact = how much the debt complicates or is worsened by this patch; importance = the strategic weight of this product's debt (EOL proximity, likely dependents). Return JSON only: {impact, importance, reasons, confidence}. Both scores 0-100. impact = how severe the consequences in YOUR dimension are; importance = how much weight your dimension deserves in THIS decision given the context. You do NOT classify risk — a policy engine derives the risk band from your two scores; report measurements, not conclusions. reasons: specific factual reasons joined by '; '. confidence 0-1 reflecting how much real data you had (thin data means low confidence; never invent facts).",
+        "llm_model_id": "e4beb455-f11a-4dd2-a873-283a7b524b72",
+        "credential_id": "72fd4b39-eea4-433d-baa3-7f5c70fe97f0",
+        "response_schema": {
+          "type": "object",
+          "required": [
+            "impact",
+            "importance",
+            "reasons",
+            "confidence"
+          ],
+          "properties": {
+            "impact": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How severe the consequences in this dimension are"
+            },
+            "reasons": {
+              "type": "string",
+              "description": "Specific factual reasons, '; '-joined"
+            },
+            "confidence": {
+              "type": "number",
+              "maximum": 1,
+              "minimum": 0
+            },
+            "importance": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0,
+              "description": "How much weight this dimension deserves in this decision"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "gate_tech_debt",
+      "name": "Validate: tech_debt",
+      "type": "http_request",
+      "position": {
+        "x": 700.8183208195123,
+        "y": 620.6200861121944
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/mythos/scoring/validate",
+        "body": {
+          "input": {
+            "agent": "tech_debt",
+            "assessment": {
+              "impact": "${agent_tech_debt.result.content.impact}",
+              "reasons": "${agent_tech_debt.result.content.reasons}",
+              "confidence": "${agent_tech_debt.result.content.confidence}",
+              "importance": "${agent_tech_debt.result.content.importance}"
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "converge_scores",
+      "name": "Converge scores",
+      "type": "converge",
+      "position": {
+        "x": 1064.9985413984414,
+        "y": 121.12903588621239
+      },
+      "parameters": {
+        "strategy": "all"
+      }
+    },
+    {
+      "id": "final_gate",
+      "name": "Policy decision (composed routing v2)",
+      "type": "http_request",
+      "position": {
+        "x": 1189.0587863303178,
+        "y": 591.016329739197
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/mythos/routing_v2/decision",
+        "body": {
+          "input": {
+            "urgency": {
+              "kev_present": "${identify.artifacts.kev_present}",
+              "max_severity": "${identify.artifacts.max_severity}",
+              "affected_count": "${identify.artifacts.affected_count}",
+              "has_vendor_fix": "${identify.artifacts.has_vendor_fix}"
+            },
+            "assessments": {
+              "tech_debt": {
+                "band": "${gate_tech_debt.body.result.band}",
+                "valid": "${gate_tech_debt.body.result.valid}",
+                "impact": "${gate_tech_debt.body.result.impact}",
+                "importance": "${gate_tech_debt.body.result.importance}",
+                "low_confidence": "${gate_tech_debt.body.result.low_confidence}"
+              },
+              "environment": {
+                "band": "${gate_environment.body.result.band}",
+                "valid": "${gate_environment.body.result.valid}",
+                "impact": "${gate_environment.body.result.impact}",
+                "importance": "${gate_environment.body.result.importance}",
+                "low_confidence": "${gate_environment.body.result.low_confidence}"
+              },
+              "blast_radius": {
+                "band": "${gate_blast_radius.body.result.band}",
+                "valid": "${gate_blast_radius.body.result.valid}",
+                "impact": "${gate_blast_radius.body.result.impact}",
+                "importance": "${gate_blast_radius.body.result.importance}",
+                "low_confidence": "${gate_blast_radius.body.result.low_confidence}"
+              },
+              "patch_known_state": {
+                "band": "${gate_patch_known_state.body.result.band}",
+                "valid": "${gate_patch_known_state.body.result.valid}",
+                "impact": "${gate_patch_known_state.body.result.impact}",
+                "importance": "${gate_patch_known_state.body.result.importance}",
+                "low_confidence": "${gate_patch_known_state.body.result.low_confidence}"
+              }
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "record_decision",
+      "name": "AAC - Record AI Decision",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1543.1543045149456,
+        "y": 870.6487869493104
+      },
+      "parameters": {
+        "extra_vars": {
+          "trace_id": "${final_gate.body.decision_id}",
+          "risk_level": "${identify.artifacts.max_severity}",
+          "gate_action": "patch_route",
+          "decision_ref": "${final_gate.body.decision_id}",
+          "policy_route": "${final_gate.body.result.route}",
+          "agent_identity": "mythos-multiagent",
+          "overrode_agent": "false",
+          "policy_reasons": "${final_gate.body.result.reasons}",
+          "agent_reasoning": "composed from blast_radius/patch_known_state/environment/tech_debt scores",
+          "agent_recommended": "measurement-only (4 dimension agents; bands ${final_gate.body.result.bands})",
+          "target_environment": "lab"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC - Record AI Decision",
+        "organization_name": "Default"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trigger_patch",
+      "name": "CVE / Patch Cycle",
+      "type": "manual_trigger",
+      "position": {
+        "x": -261.991063371632,
+        "y": 169.26947027712174
+      },
+      "parameters": {
+        "input_schema": {
+          "type": "object",
+          "required": [
+            "target_hostname"
+          ],
+          "properties": {
+            "cve_ids": {
+              "type": "string",
+              "default": ""
+            },
+            "dry_run": {
+              "type": "string",
+              "default": "yes"
+            },
+            "target_hostname": {
+              "type": "string",
+              "default": "demo-rhel9"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "description": "AI triage recommends; OPA policy decides; human approves. Lab-hosted: AAP + LLM + OPA all in-cluster.",
+  "schema_version": "2.0.0"
+}

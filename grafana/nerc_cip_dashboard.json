@@ -1,0 +1,165 @@
+{
+  "title": "NERC CIP Compliance Dashboard",
+  "uid": "nerc-cip-001",
+  "tags": ["nerc-cip", "compliance", "energy", "ot"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+
+    { "id": 1, "type": "stat", "title": "NERC CIP Score (CIP-002–013)",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "percent",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": 0 },
+          { "color": "yellow", "value": 70 },
+          { "color": "green", "value": 90 }
+        ]},
+        "mappings": []
+      }},
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+        "rawSql": "SELECT compliance_percentage AS value FROM compliance_results WHERE policy_name = 'NERC CIP' AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC LIMIT 1",
+        "format": "table"
+      }]
+    },
+
+    { "id": 2, "type": "stat", "title": "CIP-015 INSM Score",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "percent",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": 0 },
+          { "color": "yellow", "value": 70 },
+          { "color": "green", "value": 90 }
+        ]},
+        "mappings": []
+      }},
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+        "rawSql": "SELECT compliance_percentage AS value FROM compliance_results WHERE policy_name = 'NERC CIP-015 INSM' AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC LIMIT 1",
+        "format": "table"
+      }]
+    },
+
+    { "id": 3, "type": "stat", "title": "Total Violations",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": 0 },
+          { "color": "yellow", "value": 1 },
+          { "color": "red", "value": 5 }
+        ]},
+        "mappings": []
+      }},
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+        "rawSql": "SELECT SUM(failed_controls) AS value FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM') AND $__timeFilter(evaluation_timestamp)",
+        "format": "table"
+      }]
+    },
+
+    { "id": 4, "type": "stat", "title": "Standards Passing",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": 0 },
+          { "color": "yellow", "value": 8 },
+          { "color": "green", "value": 12 }
+        ]},
+        "mappings": []
+      }},
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+        "rawSql": "SELECT SUM(passed_controls) AS value FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM') AND $__timeFilter(evaluation_timestamp)",
+        "format": "table"
+      }]
+    },
+
+    { "id": 5, "type": "table", "title": "Standards Compliance Status",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 10 },
+      "fieldConfig": { "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Score" }, "properties": [
+            { "id": "unit", "value": "percent" },
+            { "id": "custom.displayMode", "value": "color-background" },
+            { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 90 }
+            ]}}
+          ]},
+          { "matcher": { "id": "byName", "options": "Status" }, "properties": [
+            { "id": "custom.displayMode", "value": "color-background" },
+            { "id": "mappings", "value": [
+              { "type": "value", "options": { "PASS": { "color": "green", "index": 0 }, "FAIL": { "color": "red", "index": 1 } } }
+            ]}
+          ]}
+        ]
+      },
+      "options": { "sortBy": [{ "displayName": "Standard", "desc": false }] },
+      "targets": [{ "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+        "rawSql": "SELECT policy_name AS \"Standard\", policy_version AS \"Version\", ROUND(compliance_percentage::numeric, 1) AS \"Score\", CASE WHEN compliance_percentage >= 90 THEN 'PASS' ELSE 'FAIL' END AS \"Status\", failed_controls AS \"Violations\", evaluation_timestamp AS \"Last Assessed\" FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC",
+        "format": "table"
+      }]
+    },
+
+    { "id": 6, "type": "timeseries", "title": "Compliance Score Trend",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 10 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": 0 },
+          { "color": "yellow", "value": 70 },
+          { "color": "green", "value": 90 }
+        ]},
+        "custom": { "lineWidth": 2, "fillOpacity": 10 }
+      }},
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+          "rawSql": "SELECT $__timeGroup(evaluation_timestamp,'1d'), AVG(compliance_percentage) AS \"CIP-002–013\" FROM compliance_results WHERE policy_name = 'NERC CIP' AND $__timeFilter(evaluation_timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        },
+        { "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+          "rawSql": "SELECT $__timeGroup(evaluation_timestamp,'1d'), AVG(compliance_percentage) AS \"CIP-015 INSM\" FROM compliance_results WHERE policy_name = 'NERC CIP-015 INSM' AND $__timeFilter(evaluation_timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+
+    { "id": 7, "type": "barchart", "title": "Violations by Standard",
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "short",
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": 0 },
+          { "color": "yellow", "value": 1 },
+          { "color": "red", "value": 3 }
+        ]}
+      }},
+      "options": { "xTickLabelRotation": -45, "tooltip": { "mode": "single" } },
+      "targets": [{ "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+        "rawSql": "SELECT policy_name AS \"Standard\", SUM(failed_controls) AS \"Violations\" FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM') AND $__timeFilter(evaluation_timestamp) GROUP BY policy_name ORDER BY \"Violations\" DESC",
+        "format": "table"
+      }]
+    },
+
+    { "id": 8, "type": "table", "title": "Recent Violations Detail",
+      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "custom": { "align": "left", "wrap": true } } },
+      "options": { "sortBy": [{ "displayName": "Time", "desc": true }] },
+      "targets": [{ "datasource": { "type": "grafana-postgresql-datasource", "uid": "aac-compliance-db" },
+        "rawSql": "SELECT evaluation_timestamp AS \"Time\", policy_name AS \"Standard\", jsonb_array_length(violations) AS \"Violation Count\", metadata->>'compliance_level' AS \"Level\", metadata->>'organization' AS \"Organization\" FROM compliance_results WHERE policy_name IN ('NERC CIP','NERC CIP-015 INSM') AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp DESC LIMIT 20",
+        "format": "table"
+      }]
+    },
+
+    { "id": 9, "type": "text", "title": "BES Environment",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 4 },
+      "options": { "mode": "markdown", "content": "## Simulated BES Cyber Systems\n\n| System | ID | Impact | ERC | ESP |\n|--------|----|--------|-----|-----|\n| Energy Management System (EMS) | BCS-001 | **High** | Yes | ESP-CONTROL-01 |\n| SCADA System — Transmission | BCS-002 | **High** | Yes | ESP-SCADA-01 |\n| Substation RTU — 345kV | BCS-003 | **Medium** | No | ESP-SUB-01 |\n\nAMI Utilities assessed: **Electric** (port 8085) · **Gas** (port 8086) · **Water** (port 8087)" }
+    }
+
+  ],
+  "templating": { "list": [] },
+  "annotations": { "list": [] }
+}

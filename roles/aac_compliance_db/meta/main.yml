@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  author: Tim Coulter & Claude
+  description: Deploy and initialize the containerized PostgreSQL compliance database for Ansible Automated Compliance (AAC)
+  company: Compliance Automation
+  license: MIT
+  min_ansible_version: 2.14
+  platforms:
+    - name: EL
+      versions:
+        - 8
+        - 9
+  galaxy_tags:
+    - aac
+    - compliance
+    - postgresql
+    - containers
+    - podman
+    - database
+    - infrastructure
+
+dependencies: []

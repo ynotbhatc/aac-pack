@@ -1,0 +1,148 @@
+---
+# Component manifest for the AAC Automation Orchestrator workflows, exported from
+# the lab AO on 2026-10-08. Generated from workflows/*.json; regenerate rather
+# than edit. Lab object IDs inside the JSON resolve to these names:
+#   integrations: {"f3dbc4a4-0cc4-4527-a376-a766917ea2ce": "Lab AAP MCP (mcp_server)", "9c25ccb5-a002-4a01-951e-74218bc65c27": "Lab AAP (ansible_automation_platform)", "a36e5642-a606-4ac7-95ae-7cafdf3aa8cf": "LiteLLM (Anthropic) (llm_provider)"}
+#   credentials:  {"8044f524-4dfe-48e2-a7d4-a0ae8ad5b13a": "Lab MCP Token", "54d70087-2bf0-4a52-9aef-c0c41ebbe850": "Lab AAP Token", "72fd4b39-eea4-433d-baa3-7f5c70fe97f0": "LiteLLM Master Key"}
+ao_workflows:
+  AAC — AMI Golden Meter (governed, AO):
+    file: workflows/aac_ami_golden_meter_governed_ao.json
+    lab_version: 4
+    nodes: 10
+    edges: 11
+    trigger:
+    - manual_trigger
+    trigger_inputs:
+    - drift_fields
+    - change_ticket
+    - affected_meter
+    aap_job_templates:
+    - AAC - CIP-008 Incident Response
+    - AAC - Record AI Decision
+    - AMI_GoldenMeter_DeviceCompliance
+    - AMI_GoldenMeter_NotifyAlert
+    - AMI_GoldenMeter_Rollback
+    aap_workflow_templates: []
+    opa_routing_entrypoints:
+    - aac/ami/routing/decision
+    uses_llm: true
+    uses_mcp_tools: true
+    approvals: 1
+    switch_or_converge_nodes: 1
+  AAC - GPU Cross-Domain Flex (governed, lab AAP):
+    file: workflows/aac_gpu_cross_domain_flex_governed_lab_aap.json
+    lab_version: 13
+    nodes: 15
+    edges: 16
+    trigger:
+    - manual_trigger
+    trigger_inputs:
+    - mig_capable
+    - vuln_passed
+    - demand_units
+    - source_domain
+    - target_domain
+    - target_hostname
+    - dest_baseline_clean
+    - domain_headroom_units
+    - cross_domain_available
+    - reimage_provenance_valid
+    aap_job_templates:
+    - AAC_GoldenImage_NotifyHelpDesk
+    aap_workflow_templates: []
+    opa_routing_entrypoints:
+    - aac/gpuflex/routing/decision
+    - aac/gpuflex/routing/enter
+    uses_llm: false
+    uses_mcp_tools: false
+    approvals: 1
+    switch_or_converge_nodes: 2
+  AAC - Golden Image (governed drift, lab AAP):
+    file: workflows/aac_golden_image_governed_drift_lab_aap.json
+    lab_version: 14
+    nodes: 13
+    edges: 13
+    trigger:
+    - manual_trigger
+    trigger_inputs:
+    - cve_ids
+    - dry_run
+    - target_hostname
+    aap_job_templates:
+    - AAC - Record AI Decision
+    - AAC_GoldenImage_Check
+    - AAC_GoldenImage_NotifyHelpDesk
+    aap_workflow_templates:
+    - AAC_GoldenImage_Enforcement
+    opa_routing_entrypoints:
+    - aac/golden/routing/decision
+    uses_llm: true
+    uses_mcp_tools: true
+    approvals: 1
+    switch_or_converge_nodes: 1
+  AAC - TEST call workflow-template via AO:
+    file: workflows/aac_test_call_workflow_template_via_ao.json
+    lab_version: 2
+    nodes: 1
+    edges: 1
+    trigger:
+    - manual_trigger
+    trigger_inputs:
+    - target_hostname
+    aap_job_templates: []
+    aap_workflow_templates:
+    - AAC_GoldenImage_Enforcement
+    opa_routing_entrypoints: []
+    uses_llm: false
+    uses_mcp_tools: false
+    approvals: 0
+    switch_or_converge_nodes: 0
+  'AAC - Tanium Comparison: Governed Drift (lab AAP)':
+    file: workflows/aac_tanium_comparison_governed_drift_lab_aap.json
+    lab_version: 10
+    nodes: 14
+    edges: 14
+    trigger:
+    - manual_trigger
+    trigger_inputs:
+    - change_ticket
+    - target_hostname
+    aap_job_templates:
+    - AAC - Record AI Decision
+    - AAC_CurrentState_Query
+    - AAC_GoldenImage_Check
+    - AAC_GoldenImage_NotifyHelpDesk
+    - AAC_GoldenImage_Rollback
+    - AAC_GoldenImage_StoreEvidence
+    aap_workflow_templates: []
+    opa_routing_entrypoints:
+    - aac/tanium/drift_routing/decision
+    uses_llm: true
+    uses_mcp_tools: true
+    approvals: 1
+    switch_or_converge_nodes: 1
+  AAC - Mythos Patch (governed + OPA, lab AAP):
+    file: workflows/aac_mythos_patch_governed_opa_lab_aap.json
+    lab_version: 18
+    nodes: 18
+    edges: 21
+    trigger:
+    - manual_trigger
+    trigger_inputs:
+    - cve_ids
+    - dry_run
+    - target_hostname
+    aap_job_templates:
+    - AAC - Identify Affected Components (catalog match)
+    - AAC - Record AI Decision
+    - AAC - Simulate Patch Risk and Heat Map
+    - AAC_GoldenImage_NotifyHelpDesk
+    aap_workflow_templates:
+    - AAC - Mythos Patch Lifecycle
+    opa_routing_entrypoints:
+    - aac/mythos/routing_v2/decision
+    - aac/mythos/scoring/validate
+    uses_llm: true
+    uses_mcp_tools: true
+    approvals: 1
+    switch_or_converge_nodes: 2

@@ -1,0 +1,409 @@
+{
+  "name": "AAC - Golden Image (governed drift, lab AAP)",
+  "edges": [
+    {
+      "to": "identify",
+      "from": "trigger_patch"
+    },
+    {
+      "to": "triage_agent",
+      "from": "identify"
+    },
+    {
+      "to": "opa_gate",
+      "from": "triage_agent"
+    },
+    {
+      "to": "route_switch",
+      "from": "opa_gate"
+    },
+    {
+      "to": "enforce_auto",
+      "from": "route_switch",
+      "from_port": "case_0"
+    },
+    {
+      "to": "approval_patch",
+      "from": "route_switch",
+      "from_port": "case_1"
+    },
+    {
+      "to": "heatmap",
+      "from": "route_switch",
+      "from_port": "case_2"
+    },
+    {
+      "to": "enforce_approved",
+      "from": "approval_patch",
+      "from_port": "approved"
+    },
+    {
+      "to": "notify_rejected",
+      "from": "approval_patch",
+      "from_port": "rejected"
+    },
+    {
+      "to": "notify_auto_close",
+      "from": "enforce_auto"
+    },
+    {
+      "to": "notify_appr_close",
+      "from": "enforce_approved"
+    },
+    {
+      "to": "hold_notify",
+      "from": "route_switch",
+      "from_port": "case_3"
+    },
+    {
+      "to": "record_decision",
+      "from": "opa_gate"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "identify",
+      "name": "Golden Image Drift Check",
+      "type": "aap_job_template",
+      "position": {
+        "x": 193.30736835782375,
+        "y": 219.27004577953744
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_Check",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "triage_agent",
+      "name": "AI Drift Triage",
+      "type": "agentic",
+      "position": {
+        "x": 349.2732739754555,
+        "y": -128.46001015684655
+      },
+      "parameters": {
+        "prompt": "You are a configuration-drift governance coordinator for a golden-image baseline. A drift check just ran on host ${trigger.target_hostname}. Read the set_stats artifacts: any_drift=${identify.artifacts.any_drift}, critical_drift=${identify.artifacts.critical_drift}, baseline_compliant=${identify.artifacts.baseline_compliant}, drifted_key=${identify.artifacts.drifted_key}. You may use the AAP Inventory MCP tools for host context. Assess whether this is a routine deviation safe to auto-roll-back, a security-relevant/critical change that should require human approval before rollback, or a case with no usable baseline that needs investigation. A policy engine makes the final routing decision; your recommendation is only an input.",
+        "llm_model_id": "c3120842-0fad-498e-871a-0ff4488f601f",
+        "credential_id": "72fd4b39-eea4-433d-baa3-7f5c70fe97f0",
+        "response_schema": {
+          "type": "object",
+          "required": [
+            "route",
+            "reasoning",
+            "confidence",
+            "severity"
+          ],
+          "properties": {
+            "route": {
+              "enum": [
+                "auto_rollback",
+                "approve_rollback",
+                "investigate"
+              ],
+              "type": "string"
+            },
+            "severity": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "number"
+            }
+          }
+        },
+        "integration_connections": [
+          {
+            "credential_id": "8044f524-4dfe-48e2-a7d4-a0ae8ad5b13a",
+            "integration_id": "f3dbc4a4-0cc4-4527-a376-a766917ea2ce"
+          }
+        ],
+        "tool_selection_strategy": "ALL"
+      }
+    },
+    {
+      "id": "route_switch",
+      "name": "Route",
+      "type": "switch",
+      "position": {
+        "x": 770.8507219340878,
+        "y": 237.78490915179708
+      },
+      "parameters": {
+        "cases": [
+          {
+            "port": "case_0",
+            "label": "Auto rollback",
+            "condition": "${opa_gate.body.result.route} == 'auto'"
+          },
+          {
+            "port": "case_1",
+            "label": "Approval required",
+            "condition": "${opa_gate.body.result.route} == 'approve'"
+          },
+          {
+            "port": "case_2",
+            "label": "Investigate",
+            "condition": "${opa_gate.body.result.route} == 'investigate'"
+          },
+          {
+            "port": "case_3",
+            "label": "Hold (managed change / rollback paused)",
+            "condition": "${opa_gate.body.result.route} == 'hold'"
+          }
+        ],
+        "default_port": "default"
+      }
+    },
+    {
+      "id": "approval_patch",
+      "name": "Approve Drift Rollback",
+      "type": "approval",
+      "position": {
+        "x": 1104.6370023419204,
+        "y": 308.43091334894615
+      },
+      "parameters": {
+        "prompt": "Configuration drift on a security-relevant control was detected on ${trigger.target_hostname}. Review and approve to roll it back to the golden-image baseline."
+      }
+    },
+    {
+      "id": "heatmap",
+      "name": "Notify Help Desk (investigate)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1162.1318453323265,
+        "y": 557.2061973612624
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "opa_gate",
+      "name": "Policy Decision (OPA)",
+      "type": "http_request",
+      "position": {
+        "x": 397.50181459965086,
+        "y": 752.3621705381021
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/golden/routing/decision",
+        "body": {
+          "input": {
+            "agent": {
+              "rationale": "${triage_agent.result.content.reasoning}",
+              "recommended_route": "${triage_agent.result.content.route}"
+            },
+            "facts": {
+              "any_drift": "${identify.artifacts.any_drift}",
+              "drifted_key": "${identify.artifacts.drifted_key}",
+              "target_host": "${trigger.target_hostname}",
+              "critical_drift": "${identify.artifacts.critical_drift}",
+              "baseline_compliant": "${identify.artifacts.baseline_compliant}"
+            }
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "notify_rejected",
+      "name": "Notify Help Desk (rollback rejected)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1661.620570687279,
+        "y": 621.8494330305552
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "ticket_status": "REJECTED_MANUAL_REVIEW"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "notify_auto_close",
+      "name": "Notify Help Desk (close)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1536.317471835811,
+        "y": -46.830870786472914
+      },
+      "parameters": {
+        "extra_vars": {
+          "action": "close",
+          "target_host": "${trigger.target_hostname}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "notify_appr_close",
+      "name": "Notify Help Desk (close)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1918.867097953659,
+        "y": 261.88166417691093
+      },
+      "parameters": {
+        "extra_vars": {
+          "action": "close",
+          "target_host": "${trigger.target_hostname}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "enforce_auto",
+      "name": "Enforce via AAP Workflow (196)",
+      "type": "aap_workflow_job_template",
+      "position": {
+        "x": 1073.0799326970834,
+        "y": -57.71065231875519
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "auto_rollback": "true"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "organization_name": "Default",
+        "workflow_job_template_name": "AAC_GoldenImage_Enforcement"
+      }
+    },
+    {
+      "id": "enforce_approved",
+      "name": "Enforce via AAP Workflow (196)",
+      "type": "aap_workflow_job_template",
+      "position": {
+        "x": 1563.3374478650926,
+        "y": 252.9880401500925
+      },
+      "parameters": {
+        "extra_vars": {
+          "target_host": "${trigger.target_hostname}",
+          "auto_rollback": "true"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "organization_name": "Default",
+        "workflow_job_template_name": "AAC_GoldenImage_Enforcement"
+      }
+    },
+    {
+      "id": "hold_notify",
+      "name": "Record: drift held (no rollback)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 840.9892496292415,
+        "y": 658.0330388882992
+      },
+      "parameters": {
+        "extra_vars": {
+          "action": "open",
+          "target_host": "${trigger.target_hostname}",
+          "ticket_status": "HELD_MANAGED_CHANGE"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC_GoldenImage_NotifyHelpDesk",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "record_decision",
+      "name": "AAC - Record AI Decision",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1374.726902696729,
+        "y": 911.8291398160643
+      },
+      "parameters": {
+        "extra_vars": {
+          "trace_id": "${opa_gate.body.decision_id}",
+          "gate_action": "route",
+          "decision_ref": "${opa_gate.body.decision_id}",
+          "policy_route": "${opa_gate.body.result.route}",
+          "agent_identity": "golden-image",
+          "overrode_agent": "${opa_gate.body.result.overrode_agent}",
+          "policy_reasons": "${opa_gate.body.result.reasons}",
+          "agent_reasoning": "${triage_agent.result.content.reasoning}",
+          "agent_recommended": "${triage_agent.result.content.route}",
+          "target_environment": "lab"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC - Record AI Decision",
+        "organization_name": "Default"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trigger_patch",
+      "name": "Golden Image Drift",
+      "type": "manual_trigger",
+      "position": {
+        "x": -109.90017123470028,
+        "y": 269.68271138353094
+      },
+      "parameters": {
+        "input_schema": {
+          "type": "object",
+          "required": [
+            "target_hostname"
+          ],
+          "properties": {
+            "cve_ids": {
+              "type": "string",
+              "default": ""
+            },
+            "dry_run": {
+              "type": "string",
+              "default": "yes"
+            },
+            "target_hostname": {
+              "type": "string",
+              "default": "demo-rhel9"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "description": "AAC - Golden Image (governed drift, lab AAP)",
+  "schema_version": "2.0.0"
+}

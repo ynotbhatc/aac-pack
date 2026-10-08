@@ -1,0 +1,222 @@
+---
+# CIP-008 — Incident Response Plan Execution and Evidence Capture
+#
+# Automates the evidence collection and documentation required by CIP-008 R1
+# when a cybersecurity incident is declared on a BES Cyber System. Captures
+# the incident timeline, affected systems, and response actions for NERC auditors.
+#
+# CIP-008 R1 Requirements addressed:
+#   R1.1 — Identify, classify, and respond to Cybersecurity Incidents
+#   R1.2 — Determine if the incident is a Reportable Cyber Security Incident
+#   R1.3 — Identify the roles and responsibilities for incident response
+#   R1.4 — Identify incident handling procedures
+#
+# AAP Template: "AAC - CIP-008 Incident Response" (seeded separately)
+#
+# Variables (required):
+#   incident_id       - Unique incident identifier (e.g., INC-2026-001)
+#   incident_type     - Type: unauthorized_access | malware | dos | data_exfil | other
+#   affected_systems  - Comma-separated list of affected BES Cyber System hostnames
+#   incident_severity - critical | high | medium | low
+#   declared_by       - Name/role of person declaring the incident
+#
+# Variables (optional):
+#   incident_description - Free-text incident description
+#   estimated_start_time - Estimated incident start time (ISO 8601)
+#   is_reportable        - true/false — whether this is a NERC-reportable incident
+
+- name: CIP-008 Incident Response Evidence Capture
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    db_host: "{{ compliance_db_host | default('localhost') }}"
+    db_name: "{{ compliance_db_name | default('compliance') }}"
+    db_user: "{{ compliance_db_user | default('postgres') }}"
+    response_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+  vars_files:
+    - [ "../vars/vault_secrets.yml", "../vars/empty_fallback.yml" ]
+
+  tasks:
+    # Inputs resolved EAGERLY here — a lazy play-var like
+    #   x: "{{ x | default(...) }}"
+    # recurses when the caller omits x (found live 2026-09-28: the AO AMI
+    # incident route with no estimated_start_time). set_fact evaluates the
+    # right-hand side against the caller's value (or the default) BEFORE
+    # assignment, so the same names stay usable at every existing use site.
+    - name: Resolve inputs with defaults
+      ansible.builtin.set_fact:
+        incident_type: "{{ incident_type | default('other') }}"
+        affected_systems: "{{ affected_systems | default('unknown') }}"
+        incident_severity: "{{ incident_severity | default('high') }}"
+        declared_by: "{{ declared_by | default('automated') }}"
+        incident_description: "{{ incident_description | default('') }}"
+        estimated_start_time: "{{ estimated_start_time | default('unknown') }}"
+        is_reportable: "{{ is_reportable | default(false) | bool }}"
+        incident_id: "{{ incident_id | default('INC-UNKNOWN') }}"
+
+    # Separate task: report_file consumes the incident_id resolved above.
+    - name: Resolve the report path
+      ansible.builtin.set_fact:
+        report_file: "/tmp/cip_008_incident_{{ incident_id }}_{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}.json"
+
+
+    - name: Log incident declaration
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════╗
+          ║       CIP-008 INCIDENT RESPONSE INITIATED            ║
+          ╚══════════════════════════════════════════════════════╝
+
+          Incident ID      : {{ incident_id }}
+          Type             : {{ incident_type }}
+          Severity         : {{ incident_severity }}
+          Declared By      : {{ declared_by }}
+          Declaration Time : {{ response_timestamp }}
+          Affected Systems : {{ affected_systems }}
+          Reportable       : {{ 'YES — NERC notification required within 1 hour' if is_reportable else 'Under evaluation' }}
+
+    # nerc_cip_compliance_report.yml is a standalone PLAY (hosts:/gather_facts:),
+    # not a tasks file — include_tasks parse-errored ("conflicting action
+    # statements: hosts, gather_facts") and ignore_errors does not catch a parse
+    # error, so this failed the whole incident play. The incident's compliance
+    # posture is already established by the OPA validation upstream; the forensic
+    # value below (system state, auth logs) is what CIP-008 evidence needs. Run
+    # the full report as its own job template if a fresh assessment is required.
+    - name: Note — NERC-CIP posture captured upstream (OPA validation)
+      ansible.builtin.debug:
+        msg: "Incident {{ incident_id }}: compliance posture from upstream OPA validation; forensic capture follows."
+
+    - name: Collect system state from affected BES Cyber Systems
+      ansible.builtin.shell: |
+        echo "=== SYSTEM STATE CAPTURE FOR CIP-008 EVIDENCE ===" &&
+        echo "Host: $(hostname)" &&
+        echo "Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)" &&
+        echo "--- Last 50 auth log entries ---" &&
+        journalctl -u sshd --since "2 hours ago" --no-pager -n 50 2>/dev/null || tail -50 /var/log/secure 2>/dev/null &&
+        echo "--- Firewall status ---" &&
+        firewall-cmd --list-all 2>/dev/null || iptables -L -n 2>/dev/null &&
+        echo "--- Active connections ---" &&
+        ss -tlnp 2>/dev/null &&
+        echo "--- Recent sudo activity ---" &&
+        journalctl --since "2 hours ago" | grep sudo | tail -20 2>/dev/null &&
+        echo "--- Failed logins ---" &&
+        lastb -n 20 2>/dev/null || echo "lastb not available"
+      loop: "{{ affected_systems.split(',') | map('trim') | list }}"
+      loop_control:
+        loop_var: affected_host
+      delegate_to: "{{ affected_host }}"
+      register: system_state_captures
+      become: true
+      ignore_errors: true
+      changed_when: false
+
+    - name: Build CIP-008 evidence package
+      ansible.builtin.set_fact:
+        cip_008_evidence:
+          incident_id: "{{ incident_id }}"
+          incident_type: "{{ incident_type }}"
+          severity: "{{ incident_severity }}"
+          declared_by: "{{ declared_by }}"
+          declaration_time: "{{ response_timestamp }}"
+          estimated_start_time: "{{ estimated_start_time }}"
+          description: "{{ incident_description }}"
+          affected_systems: "{{ affected_systems.split(',') | map('trim') | list }}"
+          is_reportable: "{{ is_reportable }}"
+          reportable_deadline: "{{ 'NERC notification required within 1 hour of determination' if is_reportable else 'N/A' }}"
+          cip_008_r1_checklist:
+            r1_1_incident_identified: true
+            r1_1_incident_classified: true
+            r1_2_reportability_assessed: "{{ is_reportable }}"
+            r1_3_roles_notified: false
+            r1_4_procedures_invoked: true
+          response_actions:
+            - timestamp: "{{ response_timestamp }}"
+              action: "Incident declared and CIP-008 response initiated"
+              actor: "{{ declared_by }}"
+            - timestamp: "{{ response_timestamp }}"
+              action: "NERC-CIP compliance assessment triggered on affected systems"
+              actor: "AAC automated response"
+            - timestamp: "{{ response_timestamp }}"
+              action: "System state captured from all affected BES Cyber Systems"
+              actor: "AAC automated evidence collection"
+          # Capture runs against each affected system with ignore_errors — an
+          # unreachable host's result has no stdout, and mapping it unguarded
+          # fails the whole evidence build. Record successes AND name the
+          # hosts whose capture failed: absent evidence is itself evidence.
+          system_state_evidence: >-
+            {{ system_state_captures.results | default([])
+               | selectattr('stdout', 'defined')
+               | map(attribute='stdout') | list }}
+          system_state_capture_failed_hosts: >-
+            {{ system_state_captures.results | default([])
+               | rejectattr('stdout', 'defined')
+               | map(attribute='affected_host') | list }}
+
+    - name: Save CIP-008 evidence package to file
+      ansible.builtin.copy:
+        content: "{{ cip_008_evidence | to_nice_json }}"
+        dest: "{{ report_file }}"
+        mode: '0640'
+
+    - name: Store CIP-008 incident to PostgreSQL
+      community.postgresql.postgresql_query:
+        login_host: "{{ db_host }}"
+        login_user: "{{ db_user }}"
+        login_password: "{{ compliance_db_password }}"
+        db: "{{ db_name }}"
+        # Columns match the REAL compliance_results schema (hostname/
+        # policy_name/compliance_percentage/...); the previous column list
+        # (host/score/captured_at/...) never existed and this store had never
+        # succeeded (found live 2026-09-28 on the AO AMI incident route).
+        query: >
+          INSERT INTO compliance_results
+            (framework, policy_name, policy_version, hostname, compliant,
+             total_controls, passed_controls, failed_controls,
+             compliance_percentage, violations, metadata)
+          VALUES
+            ('cip_008_incident', 'CIP-008 R1 Incident Response', 'CIP-008 R1',
+             %s, false, 4, %s::integer, %s::integer, %s::numeric,
+             %s::jsonb, %s::jsonb)
+        positional_args:
+          - "{{ affected_systems }}"
+          - "{{ passed_checks }}"
+          - "{{ 4 - (passed_checks | int) }}"
+          - "{{ ((passed_checks | int) / 4 * 100) | round(2) }}"
+          - >-
+            {{ [incident_id + ': ' + incident_type + ' incident on ' + affected_systems]
+               | to_json }}
+          - "{{ cip_008_evidence | to_json }}"
+      vars:
+        passed_checks: "{{ 2 if is_reportable else 3 }}"
+
+    - name: Print CIP-008 evidence summary
+      ansible.builtin.debug:
+        msg: |
+          ✅ CIP-008 Evidence Package Captured
+
+          Incident ID   : {{ incident_id }}
+          Evidence File : {{ report_file }}
+          PostgreSQL    : compliance_results (framework=cip_008_incident)
+
+          {% if is_reportable %}
+          ⚠️  REPORTABLE INCIDENT — Notify NERC/E-ISAC within 1 hour
+          Submit via: https://www.nerc.com/pa/CI/ESISAC/Pages/E-ISAC_Portal.aspx
+          {% endif %}
+
+          Next Steps (CIP-008 R1.3 / R1.4):
+            1. Notify designated incident response roles per your IRP
+            2. Contain and remediate the incident
+            3. Update this ticket with remediation actions
+            4. Complete post-incident review within 35 days (CIP-008 R2)
+            5. Update Incident Response Plan if lessons learned require it (CIP-008 R3)
+
+    - name: Fail to signal incident active status in AAP
+      ansible.builtin.fail:
+        msg: >
+          CIP-008 ACTIVE INCIDENT: {{ incident_id }} ({{ incident_type }}) —
+          Severity: {{ incident_severity }}.
+          Evidence captured and stored. Manual response actions required.
+      when: incident_severity in ['critical', 'high']

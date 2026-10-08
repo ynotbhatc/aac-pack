@@ -1,0 +1,129 @@
+---
+# golden_image_rollback_macaap.yml
+#
+# Restore the monitored golden file in the demo-rhel9 pod from the approved
+# baseline stored in PostgreSQL. The natural follow-up to a FAIL from Golden
+# Image Check.
+#
+# Survey/extra_vars:
+#   target_host       — Deployment label (default: demo-rhel9)
+#   golden_file_key   — jsonb key in golden_files (default: selinux_config)
+#   golden_file_path  — path of the monitored file (default: /etc/selinux/config)
+
+- name: Rollback to Golden Image (mac-aap)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_host:   "demo-rhel9"
+    target_ns:     "aac"
+    golden_file_key:  "selinux_config"
+    golden_file_path: "/etc/selinux/config"
+    pg_host:       "compliance-db.aac.svc.cluster.local"
+    pg_port:       5432
+    pg_user:       "compliance"
+    pg_db:         "compliance"
+    pg_password:   "{{ compliance_db_password | default('compliance') }}"
+
+  tasks:
+    - name: Banner
+      debug:
+        msg:
+          - "Rollback to Golden Image — mac-aap"
+          - "Target: deploy/{{ target_host }} ({{ golden_file_path }})"
+
+    - name: Fetch baseline content from PostgreSQL
+      community.postgresql.postgresql_query:
+        login_host:     "{{ pg_host }}"
+        login_port:     "{{ pg_port }}"
+        login_user:     "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db:             "{{ pg_db }}"
+        query: |
+          SELECT baseline_label, golden_files
+          FROM golden_image_baselines
+          WHERE hostname = %s AND is_current = true
+          ORDER BY captured_at DESC
+          LIMIT 1
+        positional_args:
+          - "{{ target_host }}"
+      register: golden_result
+
+    - name: Fail if no baseline
+      fail:
+        msg: "No current baseline for {{ target_host }}. Cannot rollback."
+      when: golden_result.query_result | length == 0
+
+    - name: Extract baseline
+      set_fact:
+        baseline_label:   "{{ golden_result.query_result[0].baseline_label }}"
+        baseline_content: "{{ golden_result.query_result[0].golden_files[golden_file_key] }}"
+
+    - name: Find the running pod
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ target_ns }}"
+        label_selectors:
+          - "app={{ target_host }}"
+      register: pods_q
+
+    - name: Capture pod name
+      set_fact:
+        target_pod: "{{ pods_q.resources[0].metadata.name }}"
+      when: pods_q.resources | length > 0
+
+    - name: Fail if no pod
+      fail:
+        msg: "No Running pod for {{ target_host }}."
+      when: pods_q.resources | length == 0
+
+    - name: Stage the baseline content as a base64 blob (avoids quoting in shell)
+      set_fact:
+        baseline_b64: "{{ baseline_content | b64encode }}"
+
+    - name: Restore {{ golden_file_path }} from baseline
+      kubernetes.core.k8s_exec:
+        namespace: "{{ target_ns }}"
+        pod: "{{ target_pod }}"
+        command: "sh -c 'echo {{ baseline_b64 }} | base64 -d > {{ golden_file_path }}'"
+
+    - name: Verify the file matches the baseline
+      kubernetes.core.k8s_exec:
+        namespace: "{{ target_ns }}"
+        pod: "{{ target_pod }}"
+        command: "cat {{ golden_file_path }}"
+      register: post_rollback
+
+    - name: Confirm rollback success (trim to ignore trailing-newline noise)
+      set_fact:
+        rollback_ok: "{{ (post_rollback.stdout | trim) == (baseline_content | trim) }}"
+
+    # Publish the verified outcome for the AO evidence node. The evidence
+    # playbook is fail-closed on this: absent or false → it records a
+    # NON-compliant row. Only a verified restore may claim the baseline.
+    - name: Publish rollback outcome as workflow stats (for AO evidence)
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          rollback_verified: "{{ rollback_ok | bool }}"
+
+    - name: Report
+      debug:
+        msg:
+          - "═══════════════════════════════════════════════════════"
+          - "  ROLLBACK  →  {{ 'SUCCESS' if rollback_ok else 'FAIL' }}"
+          - "═══════════════════════════════════════════════════════"
+          - "  Target:    deploy/{{ target_host }} ({{ target_pod }})"
+          - "  Baseline:  {{ baseline_label }}"
+          - "  File:      {{ golden_file_path }} restored to approved state"
+          - ""
+          - "  Run 'Golden Image Check' again to verify PASS."
+          - "═══════════════════════════════════════════════════════"
+
+    - name: Fail the play if rollback didn't take
+      fail:
+        msg: "Rollback did not restore the file to the baseline content."
+      when: not rollback_ok

@@ -1,0 +1,148 @@
+---
+# Golden Image — Set / clear the managed-change rollback pause
+#
+# Flips the data-driven config that the golden-image routing policy
+# (package aac.golden.routing, in the opa-routing container) reads to decide
+# whether observed drift should be ENFORCED (rolled back) or merely HELD and
+# recorded because the change is authorized / a maintenance freeze is on.
+#
+# The policy reads data.aac.golden.config:
+#   { "rollback_paused": <bool>, "authorized_change_hosts": [ "<host>", ... ] }
+# route == "hold" wins over auto/approve/investigate when either
+#   * rollback_paused is true (global freeze), or
+#   * the drifting host is listed in authorized_change_hosts (per-host window).
+#
+# This playbook writes that document via the OPA Data API (a live PUT — takes
+# effect immediately, no pod restart). DURABILITY: a live PUT alone is lost if
+# the opa-routing pod restarts. When the "OpenShift In-Cluster (aac-demo-runner)"
+# credential is attached, this playbook ALSO patches golden_config.json in the
+# routing-policy ConfigMap — the file OPA reloads at startup — so the change
+# survives a restart, and verifies that durable write before reporting success.
+# Without the credential it applies the live change only and warns that it will
+# revert on restart. Both writes are done under a single (non-simultaneous) job.
+#
+# ── Variables (survey-friendly) ───────────────────────────────────────────────
+#   rollback_paused           yes|no   (default: no)  global enforcement freeze
+#   authorized_change_hosts   string   (default: "")   comma-separated hostnames
+#                                                       under an authorized change
+#   opa_routing_url           string   in-cluster routing OPA (has a sane default)
+#
+# Example extra_vars:
+#   rollback_paused=yes
+#   authorized_change_hosts="demo-rhel9,demo-rhel10"
+
+- name: Golden Image — set rollback pause / authorized-change hosts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  # opa_routing_url comes from site_config.yml (per-environment) — never
+  # hardcode an in-cluster endpoint in a playbook.
+  vars_files:
+    - ../vars/site_config.yml
+
+  vars:
+    rollback_paused: false
+    # authorized_change_hosts: <set via extra_vars / survey / inventory>
+
+  tasks:
+    - name: Normalize authorized_change_hosts into a clean list
+      ansible.builtin.set_fact:
+        _authorized_hosts: >-
+          {{
+            (authorized_change_hosts
+              if authorized_change_hosts is sequence and authorized_change_hosts is not string
+              else (authorized_change_hosts | default('', true) | string).split(','))
+            | map('trim') | reject('equalto', '') | list
+          }}
+
+    - name: Build the config document
+      ansible.builtin.set_fact:
+        _golden_config:
+          rollback_paused: "{{ rollback_paused | bool }}"
+          authorized_change_hosts: "{{ _authorized_hosts }}"
+
+    - name: PUT the config into the routing OPA data store (live)
+      ansible.builtin.uri:
+        url: "{{ opa_routing_url }}/v1/data/aac/golden/config"
+        method: PUT
+        body_format: json
+        body: "{{ _golden_config }}"
+        status_code: [204, 200]
+      register: _put
+
+    - name: Read the config back to confirm it took
+      ansible.builtin.uri:
+        url: "{{ opa_routing_url }}/v1/data/aac/golden/config"
+        method: GET
+        return_content: true
+      register: _get
+
+    - name: Assert the stored config matches what we set
+      ansible.builtin.assert:
+        that:
+          - _get.json.result.rollback_paused == (rollback_paused | bool)
+          - _get.json.result.authorized_change_hosts == _authorized_hosts
+        success_msg: >-
+          Rollback pause set: rollback_paused={{ rollback_paused | bool }},
+          authorized_change_hosts={{ _authorized_hosts }}
+        fail_msg: >-
+          Config write did not verify. Wanted paused={{ rollback_paused | bool }},
+          hosts={{ _authorized_hosts }}; got {{ _get.json.result }}
+
+    # Durable persistence into the routing-policy ConfigMap (the file OPA reloads
+    # at startup) so the pause survives a pod restart. Gate on BOTH host and token
+    # — a host with an empty token would send an anonymous request that fails
+    # AFTER the live write, leaving the two stores inconsistent. The expected
+    # durable value is computed once and both written and verified against it.
+    - name: Determine whether a usable OpenShift credential is attached
+      ansible.builtin.set_fact:
+        _have_k8s: "{{ ((lookup('env', 'K8S_AUTH_HOST') | default('', true)) | length > 0) and ((lookup('env', 'K8S_AUTH_API_KEY') | default('', true)) | length > 0) }}"
+        _durable_gc: "{{ {'aac': {'golden': {'config': {'rollback_paused': (rollback_paused | bool), 'authorized_change_hosts': _authorized_hosts}}}} | to_json }}"
+
+    - name: Persist the pause durably into the routing-policy ConfigMap
+      when: _have_k8s | bool
+      ansible.builtin.uri:
+        url: "{{ lookup('env', 'K8S_AUTH_HOST') }}/api/v1/namespaces/aac-policy/configmaps/routing-policy"
+        method: PATCH
+        body: "{{ {'data': {'golden_config.json': _durable_gc}} | to_json }}"
+        body_format: raw
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+          Content-Type: application/merge-patch+json
+        # Follows the credential's K8S_AUTH_VERIFY_SSL; defaults TRUE (fail closed)
+        # when unset. A self-signed CRC endpoint is handled by verify_ssl=false on
+        # the OpenShift credential, not by a hardcoded bypass.
+        validate_certs: "{{ (lookup('env', 'K8S_AUTH_VERIFY_SSL') | default('true', true)) | bool }}"
+        return_content: true
+        status_code: [200]
+      register: _persist
+
+    # Verify BOTH stores before declaring success: the live OPA read-back (_get,
+    # above) and the durable ConfigMap (from the PATCH response). If a concurrent
+    # run interleaved, these will disagree and the job fails rather than reporting
+    # an inconsistent state.
+    - name: Verify the durable ConfigMap write matches the intended state
+      when: _have_k8s | bool
+      ansible.builtin.assert:
+        that:
+          - _persist.json.data['golden_config.json'] == _durable_gc
+        fail_msg: >-
+          Durable ConfigMap write did not verify (possible concurrent run).
+          Wanted {{ _durable_gc }}; ConfigMap now holds
+          {{ _persist.json.data['golden_config.json'] }}.
+
+    - name: Warn when the change is live-only (not persisted across restart)
+      when: not (_have_k8s | bool)
+      ansible.builtin.debug:
+        msg: >-
+          Applied LIVE only — no usable OpenShift credential attached, so this
+          reverts to the ConfigMap default if the opa-routing pod restarts. Attach
+          the "OpenShift In-Cluster (aac-demo-runner)" credential to persist it.
+
+    - name: Show the effective enforcement posture
+      ansible.builtin.debug:
+        msg: >-
+          {% if (rollback_paused | bool) %}Rollbacks GLOBALLY PAUSED — all observed drift will be HELD and recorded, not enforced.
+          {% elif _authorized_hosts | length > 0 %}Rollbacks active, EXCEPT authorized-change hosts (HELD, not enforced): {{ _authorized_hosts | join(', ') }}.
+          {% else %}Rollbacks ACTIVE for all hosts — no managed-change hold in effect.{% endif %} ({{ 'persisted (survives restart)' if (_have_k8s | bool) else 'live only (reverts on restart)' }})

@@ -1,0 +1,28 @@
+---
+# aac_compliance_db — entry point
+# Expects: aac_host, pg_host, pg_user, pg_db (from site_config.yml)
+#          and compliance_db_password / compliance_reader_password (from vault).
+
+- name: Deploy PostgreSQL container
+  import_tasks: container.yml
+  when: not (aac_db_skip_container_deploy | bool)
+  tags: [aac_db, aac_db_container]
+
+- name: Initialize compliance schema
+  import_tasks: schema.yml
+  tags: [aac_db, aac_db_schema]
+
+- name: Create read-only reader role
+  import_tasks: users.yml
+  tags: [aac_db, aac_db_users]
+
+- name: Verify database health and schema
+  import_tasks: healthcheck.yml
+  tags: [aac_db, aac_db_healthcheck]
+
+- name: Generate and enable systemd unit for PostgreSQL container
+  import_tasks: systemd.yml
+  when:
+    - not (aac_db_skip_container_deploy | bool)
+    - aac_db_generate_systemd | bool
+  tags: [aac_db, aac_db_systemd]

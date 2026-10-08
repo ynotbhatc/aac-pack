@@ -1,0 +1,125 @@
+---
+# golden_image_notify_helpdesk_macaap.yml
+#
+# Opens OR closes a helpdesk ticket in the helpdesk_tickets table.
+# In production this would also push to ServiceNow / Jira / Slack — here it
+# logs to PostgreSQL so the audit trail is complete and demoable.
+#
+# Survey/extra_vars:
+#   action         — "open" or "close" (default: open)
+#   target_host    — Deployment label (default: demo-rhel9)
+#   severity       — open ticket severity (default: high)
+#   description    — free-text incident description
+
+- name: Notify Helpdesk (mac-aap)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    action:        "open"
+    target_host:   "demo-rhel9"
+    severity:      "high"
+    description:   "Golden image drift detected on /etc/selinux/config (SELINUX set to permissive)."
+    pg_host:       "compliance-db.aac.svc.cluster.local"
+    pg_port:       5432
+    pg_user:       "compliance"
+    pg_db:         "compliance"
+    pg_password:   "{{ compliance_db_password | default('compliance') }}"
+
+  tasks:
+    - name: Validate action
+      fail:
+        msg: "action must be 'open' or 'close', got '{{ action }}'"
+      when: action not in ['open', 'close']
+
+    # ── OPEN ticket ──────────────────────────────────────────────────────────
+    - name: OPEN — insert a new helpdesk ticket
+      community.postgresql.postgresql_query:
+        login_host:     "{{ pg_host }}"
+        login_port:     "{{ pg_port }}"
+        login_user:     "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db:             "{{ pg_db }}"
+        query: |
+          INSERT INTO helpdesk_tickets
+            (hostname, incident_type, severity, description,
+             triggered_by, rollback_status, status)
+          VALUES (%s, 'golden_image_drift', %s, %s,
+                  %s, 'IN_PROGRESS', 'OPEN')
+          RETURNING id, created_at, status
+        positional_args:
+          - "{{ target_host }}"
+          - "{{ severity }}"
+          - "{{ description }}"
+          - "AAC Golden Image Workflow ({{ awx_workflow_job_id | default('manual') }})"
+      register: opened
+      when: action == "open"
+
+    - name: Report — ticket OPENED
+      debug:
+        msg:
+          - "═══════════════════════════════════════════════════════"
+          - "  HELPDESK TICKET OPENED"
+          - "═══════════════════════════════════════════════════════"
+          - "  Ticket ID:    {{ opened.query_result[0].id }}"
+          - "  Created:      {{ opened.query_result[0].created_at }}"
+          - "  Status:       OPEN"
+          - "  Host:         {{ target_host }}"
+          - "  Severity:     {{ severity }}"
+          - "  Description:  {{ description }}"
+          - "═══════════════════════════════════════════════════════"
+          - ""
+          - "  Rollback will run next to remediate."
+      when: action == "open"
+
+    # ── CLOSE ticket ─────────────────────────────────────────────────────────
+    - name: CLOSE — update the most recent OPEN ticket for this host
+      community.postgresql.postgresql_query:
+        login_host:     "{{ pg_host }}"
+        login_port:     "{{ pg_port }}"
+        login_user:     "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db:             "{{ pg_db }}"
+        query: |
+          UPDATE helpdesk_tickets
+          SET status          = 'AUTO_REMEDIATED',
+              rollback_status = 'COMPLETED',
+              resolved_at       = NOW(),
+              description     = description || E'\n--- closed ---\n' || %s
+          WHERE id = (
+            SELECT id FROM helpdesk_tickets
+            WHERE hostname = %s AND status = 'OPEN'
+            ORDER BY created_at DESC
+            LIMIT 1
+          )
+          RETURNING id, created_at, resolved_at, status
+        positional_args:
+          - "Drift remediated; verification check passed."
+          - "{{ target_host }}"
+      register: closed
+      when: action == "close"
+
+    - name: Report — ticket CLOSED
+      debug:
+        msg:
+          - "═══════════════════════════════════════════════════════"
+          - "  HELPDESK TICKET CLOSED"
+          - "═══════════════════════════════════════════════════════"
+          - "  Ticket ID:    {{ closed.query_result[0].id }}"
+          - "  Opened:       {{ closed.query_result[0].created_at }}"
+          - "  Closed:       {{ closed.query_result[0].resolved_at }}"
+          - "  Status:       {{ closed.query_result[0].status }}"
+          - "  Host:         {{ target_host }}"
+          - "═══════════════════════════════════════════════════════"
+          - ""
+          - "  Audit trail complete: drift → ticket opened → remediated →"
+          - "  verified → ticket closed."
+      when: action == "close" and (closed.query_result | length) > 0
+
+    - name: Warning — no OPEN ticket found to close
+      debug:
+        msg: |
+          No OPEN ticket found for host '{{ target_host }}'.
+          Either the previous step didn't open one, or it was already closed.
+      when: action == "close" and (closed.query_result | length) == 0

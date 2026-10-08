@@ -1,0 +1,41 @@
+---
+# Verify PostgreSQL is running and all schema tables exist.
+
+- name: Verify database connectivity
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: "SELECT version()"
+  register: pg_version_check
+
+- name: Verify all expected tables are present
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    query: |
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN (
+          'compliance_results', 'compliance_facts',
+          'host_facts', 'sidecar_datasets'
+        )
+      ORDER BY table_name
+  register: db_schema_check
+
+- name: Schema health summary
+  debug:
+    msg:
+      - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - "  AAC Compliance DB — Health Check"
+      - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - "  PostgreSQL: {{ pg_version_check.query_result[0].version | default('unknown') | truncate(60) }}"
+      - "  Tables present ({{ db_schema_check.query_result | length }}/4):
+          {{ db_schema_check.query_result | map(attribute='table_name') | list | join(', ') }}"
+      - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

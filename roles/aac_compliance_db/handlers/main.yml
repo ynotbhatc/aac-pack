@@ -1,0 +1,7 @@
+---
+# Restart handler for the PostgreSQL container.
+# Notify this from tasks that require a PostgreSQL restart (e.g., config changes).
+
+- name: restart_postgresql
+  command: "podman restart {{ aac_db_container_name }}"
+  delegate_to: "{{ aac_host }}"

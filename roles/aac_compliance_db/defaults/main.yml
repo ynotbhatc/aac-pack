@@ -1,0 +1,33 @@
+---
+# aac_compliance_db role defaults
+# Override any of these in group_vars, host_vars, or the calling play's vars block.
+
+# PostgreSQL container image.
+# registry.access.redhat.com/ubi9/postgresql-15 does not exist (wrong path/tag).
+# docker.io/postgres:15 is used here as there is no equivalent image on quay.io
+# that works without auth in a rootless podman setup. If using an RH registry,
+# set this to registry.redhat.io/rhel9/postgresql-15 and ensure auth is configured.
+aac_db_image: "docker.io/postgres:15"
+
+# Container and volume names
+aac_db_container_name: "postgresql"
+aac_db_volume: "compliance_pgdata"
+
+# Networking
+aac_db_port: 5432
+
+# Database credentials — passwords are expected from Ansible Vault.
+# compliance_db_password and compliance_reader_password must be set in vault_secrets.yml.
+aac_db_name: "compliance"
+aac_db_user: "postgres"
+aac_db_password: "{{ compliance_db_password }}"
+aac_db_reader_user: "compliance_reader"
+aac_db_reader_password: "{{ compliance_reader_password }}"
+
+# Set to false to skip systemd unit generation/enablement.
+aac_db_generate_systemd: true
+
+# Set to true to skip container deployment and run schema tasks only.
+# Useful when the container is already running and you only need to
+# add new tables (e.g., called from aac_init_facts_schema.yml).
+aac_db_skip_container_deploy: false

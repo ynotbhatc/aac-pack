@@ -1,0 +1,142 @@
+---
+# current_state_query_macaap.yml
+#
+# "What is the current state of this system?" — answered FROM THE DATABASE,
+# without touching the host. The Tanium-comparison beat made executable: the
+# nightly sweep + change-triggered collection keep Postgres current, so the
+# answer (OS, kernel, package versions, pending patches, compliance verdicts,
+# baseline status) is a query, not a fleet interrogation.
+#
+# Publishes a compact state summary via set_stats for the AO workflow, and
+# prints the full answer for the demo screen.
+#
+# Survey/extra_vars:
+#   target_host   — hostname to report on (default: demo-rhel9)
+#   package_names — comma-separated packages to version-report (default below)
+
+- name: Current State Query (from the compliance database)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_host:   "demo-rhel9"
+    package_names: "kernel,openssl,openssh-server,sudo,glibc"
+    pg_host:       "compliance-db.aac.svc.cluster.local"
+    pg_port:       5432
+    pg_user:       "compliance"
+    pg_db:         "compliance"
+    pg_password:   "{{ compliance_db_password | default('compliance') }}"
+
+  tasks:
+    - name: OS identity and collection freshness (host_facts_latest)
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db: "{{ pg_db }}"
+        query: |
+          SELECT os_family, os_distribution, os_version,
+                 facts->'ansible_facts'->>'ansible_kernel' AS kernel,
+                 collected_at
+          FROM host_facts_latest WHERE hostname = %s
+        positional_args: ["{{ target_host }}"]
+      register: os_q
+
+    - name: Selected package versions (installed_inventory)
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db: "{{ pg_db }}"
+        query: |
+          SELECT package_name, package_version, architecture, last_seen_at
+          FROM installed_inventory
+          WHERE hostname = %s AND package_name = ANY(string_to_array(%s, ','))
+          ORDER BY package_name
+        positional_args: ["{{ target_host }}", "{{ package_names }}"]
+      register: pkg_q
+
+    - name: Package inventory size
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db: "{{ pg_db }}"
+        query: "SELECT count(*) AS n FROM installed_inventory WHERE hostname = %s"
+        positional_args: ["{{ target_host }}"]
+      register: pkgcount_q
+
+    - name: Pending patch work (patch_worklist — installed vs fixed)
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db: "{{ pg_db }}"
+        query: |
+          SELECT cve_id, severity, kev_member, product,
+                 installed_version, fixed_version
+          FROM patch_worklist WHERE hostname = %s
+          ORDER BY kev_member DESC, severity LIMIT 10
+        positional_args: ["{{ target_host }}"]
+      register: patch_q
+
+    - name: Latest compliance verdicts per framework
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db: "{{ pg_db }}"
+        query: |
+          SELECT DISTINCT ON (framework) framework, compliant,
+                 compliance_percentage, evaluation_timestamp
+          FROM compliance_results WHERE hostname = %s
+          ORDER BY framework, evaluation_timestamp DESC
+        positional_args: ["{{ target_host }}"]
+      register: verdict_q
+
+    - name: Golden-image baseline status
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        db: "{{ pg_db }}"
+        query: |
+          SELECT baseline_label, captured_at FROM golden_image_baselines
+          WHERE hostname = %s AND is_current = true
+          ORDER BY captured_at DESC LIMIT 1
+        positional_args: ["{{ target_host }}"]
+      register: baseline_q
+
+    - name: The answer — current state, no host contact
+      debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════"
+          - "  CURRENT STATE of {{ target_host }} — answered from PostgreSQL"
+          - "  (no agent, no live query to the host — the database IS current)"
+          - "═══════════════════════════════════════════════════════════════"
+          - "OS: {{ (os_q.query_result[0].os_distribution ~ ' ' ~ os_q.query_result[0].os_version) if os_q.query_result else 'no facts row' }}   kernel: {{ os_q.query_result[0].kernel if os_q.query_result else '-' }}"
+          - "Facts as of: {{ os_q.query_result[0].collected_at if os_q.query_result else '-' }}"
+          - "Installed packages on file: {{ pkgcount_q.query_result[0].n }}"
+          - "Selected versions: {{ pkg_q.query_result | map(attribute='package_name') | zip(pkg_q.query_result | map(attribute='package_version')) | map('join', '=') | list }}"
+          - "Pending patch items: {{ patch_q.query_result | length }}{{ ' (top: ' ~ (patch_q.query_result[0].cve_id ~ ' ' ~ patch_q.query_result[0].product ~ ' ' ~ patch_q.query_result[0].installed_version ~ ' → ' ~ patch_q.query_result[0].fixed_version) ~ ')' if patch_q.query_result else '' }}"
+          - "Compliance verdicts: {{ verdict_q.query_result | map(attribute='framework') | zip(verdict_q.query_result | map(attribute='compliant')) | map('join', '=') | list }}"
+          - "Golden baseline: {{ baseline_q.query_result[0].baseline_label if baseline_q.query_result else 'none' }} ({{ baseline_q.query_result[0].captured_at if baseline_q.query_result else '-' }})"
+
+    - name: Publish the state summary for the AO workflow
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          state_os: "{{ (os_q.query_result[0].os_distribution ~ ' ' ~ os_q.query_result[0].os_version) if os_q.query_result else 'unknown' }}"
+          state_kernel: "{{ os_q.query_result[0].kernel if os_q.query_result else 'unknown' }}"
+          state_facts_as_of: "{{ os_q.query_result[0].collected_at if os_q.query_result else '' }}"
+          state_package_count: "{{ pkgcount_q.query_result[0].n }}"
+          state_pending_patches: "{{ patch_q.query_result | length }}"
+          state_frameworks_tracked: "{{ verdict_q.query_result | length }}"

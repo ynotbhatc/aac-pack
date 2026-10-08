@@ -1,0 +1,337 @@
+{
+  "name": "AAC — AMI Golden Meter (governed, AO)",
+  "edges": [
+    {
+      "to": "assess",
+      "from": "trigger_tamper"
+    },
+    {
+      "to": "triage_agent",
+      "from": "assess"
+    },
+    {
+      "to": "opa_gate",
+      "from": "triage_agent"
+    },
+    {
+      "to": "route_switch",
+      "from": "opa_gate"
+    },
+    {
+      "to": "rollback",
+      "from": "route_switch",
+      "from_port": "case_0"
+    },
+    {
+      "to": "approval_rollback",
+      "from": "route_switch",
+      "from_port": "case_1"
+    },
+    {
+      "to": "rollback",
+      "from": "approval_rollback",
+      "from_port": "approved"
+    },
+    {
+      "to": "incident",
+      "from": "route_switch",
+      "from_port": "case_2"
+    },
+    {
+      "to": "verify",
+      "from": "rollback"
+    },
+    {
+      "to": "escalate",
+      "from": "approval_rollback",
+      "from_port": "rejected"
+    },
+    {
+      "to": "record_decision",
+      "from": "opa_gate"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "assess",
+      "name": "Validate Meter Variance (OPA)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 182.55778120184902,
+        "y": 318.0893682588598
+      },
+      "parameters": {
+        "extra_vars": {
+          "affected_meter": "${trigger.affected_meter}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AMI_GoldenMeter_DeviceCompliance",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "triage_agent",
+      "name": "AI Bad-Actor & Criticality Triage",
+      "type": "agentic",
+      "position": {
+        "x": 472.11093990755,
+        "y": 337.195685670262
+      },
+      "parameters": {
+        "prompt": "You are a NERC CIP configuration-baseline + threat coordinator for a utility's AMI fleet. A meter variance has been validated by OPA. Decide the governance route AND whether this change is the work of a bad actor.\n\nContext:\n- Meter: ${trigger.affected_meter}\n- Changed fields: ${trigger.drift_fields}\n- Change ticket on record: ${trigger.change_ticket}\n- The variance was already validated against OPA by the assess step. Reason from the changed fields and the change ticket below; use the AAP MCP to read the meter's current state and recent change history.\n\nStep 1 — Authorization. If change_ticket is non-empty, the change is potentially authorized; if empty, it is unauthorized.\n\nStep 2 — Bad-actor assessment. Use the AAP MCP to read the meter's context and recent change pattern. A change is a suspected BAD ACTOR when it is unauthorized AND touches a security-relevant field (crypto_key, esp_config, firmware), or shows tamper indicators inconsistent with a maintenance change. An authorized change that matches its ticket is NOT a bad actor.\n\nStep 3 — Recommend a route (you RECOMMEND; OPA decides and may override you toward safety):\n- 'auto_remediate'    : authorized, non-security-relevant drift on a routine meter.\n- 'approve_remediate' : critical/revenue/ESP meter, or unauthorized change — a human should approve rollback.\n- 'investigate'       : you cannot establish authorization or the pattern is anomalous.\n\nOutput JSON: {\"route\": \"...\", \"bad_actor_suspected\": true|false, \"reasoning\": \"...\", \"confidence\": 0-100}. The reasoning is shown to the approver and, if this becomes an incident, to the responder.",
+        "llm_model_id": "c3120842-0fad-498e-871a-0ff4488f601f",
+        "credential_id": "72fd4b39-eea4-433d-baa3-7f5c70fe97f0",
+        "response_schema": {
+          "type": "object",
+          "required": [
+            "route",
+            "bad_actor_suspected",
+            "reasoning",
+            "confidence"
+          ],
+          "properties": {
+            "route": {
+              "enum": [
+                "auto_remediate",
+                "approve_remediate",
+                "investigate"
+              ],
+              "type": "string"
+            },
+            "reasoning": {
+              "type": "string",
+              "description": "Shown to the approver / incident responder."
+            },
+            "confidence": {
+              "type": "number",
+              "description": "0-100"
+            },
+            "bad_actor_suspected": {
+              "type": "boolean"
+            }
+          }
+        },
+        "integration_connections": [
+          {
+            "credential_id": "8044f524-4dfe-48e2-a7d4-a0ae8ad5b13a",
+            "integration_id": "f3dbc4a4-0cc4-4527-a376-a766917ea2ce"
+          }
+        ],
+        "tool_selection_strategy": "ALL"
+      }
+    },
+    {
+      "id": "opa_gate",
+      "name": "Policy decision (OPA — govern the AI)",
+      "type": "http_request",
+      "position": {
+        "x": 851.4637904468414,
+        "y": -62.1263482280431
+      },
+      "parameters": {
+        "url": "http://opa-routing.aac-policy.svc:8181/v1/data/aac/ami/routing/decision",
+        "body": {
+          "input": {
+            "agent": {
+              "reasoning": "${triage_agent.result.content.reasoning}",
+              "recommended_route": "${triage_agent.result.content.route}",
+              "bad_actor_suspected": "${triage_agent.result.content.bad_actor_suspected}"
+            },
+            "drift": {
+              "fields": "${trigger.drift_fields}"
+            },
+            "meter": {
+              "id": "${trigger.affected_meter}"
+            },
+            "change_ticket": "${trigger.change_ticket}"
+          }
+        },
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "route_switch",
+      "name": "Route on OPA verdict",
+      "type": "switch",
+      "position": {
+        "x": 958.5283328170655,
+        "y": 597.1581848858962
+      },
+      "parameters": {
+        "cases": [
+          {
+            "port": "case_0",
+            "label": "Auto-remediate",
+            "condition": "${opa_gate.body.result.route} == 'auto'"
+          },
+          {
+            "port": "case_1",
+            "label": "Human approval (critical/unauthorized)",
+            "condition": "${opa_gate.body.result.route} == 'approve'"
+          },
+          {
+            "port": "case_2",
+            "label": "Bad actor — CIP-008 incident",
+            "condition": "${opa_gate.body.result.route} == 'incident'"
+          }
+        ],
+        "default_port": "default"
+      }
+    },
+    {
+      "id": "approval_rollback",
+      "name": "Approve Meter Rollback",
+      "type": "approval",
+      "position": {
+        "x": 1338.8597842835131,
+        "y": 402.68104776579355
+      },
+      "parameters": {}
+    },
+    {
+      "id": "rollback",
+      "name": "Roll Back Meter to Golden Baseline",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1286.4098613251156,
+        "y": -58.058551617873654
+      },
+      "parameters": {
+        "extra_vars": {
+          "affected_meter": "${trigger.affected_meter}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AMI_GoldenMeter_Rollback",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "verify",
+      "name": "Verify Meter Back On Baseline (OPA)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1626.1546387591668,
+        "y": -68.01208924005401
+      },
+      "parameters": {
+        "extra_vars": {
+          "affected_meter": "${trigger.affected_meter}",
+          "fail_on_variance": "true"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AMI_GoldenMeter_DeviceCompliance",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "escalate",
+      "name": "Escalate to Human — Change Rejected / Unresolved",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1763.0780553702386,
+        "y": 439.48699077162684
+      },
+      "parameters": {
+        "extra_vars": {
+          "reason": "change_rejected_by_approver",
+          "affected_meter": "${trigger.affected_meter}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AMI_GoldenMeter_NotifyAlert",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "incident",
+      "name": "CIP-008 Incident (bad actor)",
+      "type": "aap_job_template",
+      "position": {
+        "x": 1342.6810477657937,
+        "y": 644.8382126348228
+      },
+      "parameters": {
+        "extra_vars": {
+          "incident_type": "ami_meter_tamper",
+          "is_reportable": "true",
+          "affected_systems": "${trigger.affected_meter}"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC - CIP-008 Incident Response",
+        "organization_name": "Default"
+      }
+    },
+    {
+      "id": "record_decision",
+      "name": "AAC - Record AI Decision",
+      "type": "aap_job_template",
+      "position": {
+        "x": 443.6673991678347,
+        "y": -32.302608070985315
+      },
+      "parameters": {
+        "extra_vars": {
+          "trace_id": "${opa_gate.body.decision_id}",
+          "gate_action": "route",
+          "decision_ref": "${opa_gate.body.decision_id}",
+          "policy_route": "${opa_gate.body.result.route}",
+          "agent_identity": "ami-golden-meter",
+          "overrode_agent": "${opa_gate.body.result.opa_overrode_agent}",
+          "policy_reasons": "${opa_gate.body.result.reasons}",
+          "agent_reasoning": "${triage_agent.result.content.reasoning}",
+          "agent_recommended": "${triage_agent.result.content.route}",
+          "target_environment": "lab"
+        },
+        "credential_id": "54d70087-2bf0-4a52-9aef-c0c41ebbe850",
+        "integration_id": "9c25ccb5-a002-4a01-951e-74218bc65c27",
+        "job_template_name": "AAC - Record AI Decision",
+        "organization_name": "Default"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "trigger_tamper",
+      "name": "Meter Tamper / Baseline Variance Detected",
+      "type": "manual_trigger",
+      "position": {
+        "x": -99.35285053929121,
+        "y": 379.2295839753467
+      },
+      "parameters": {
+        "input_schema": {
+          "type": "object",
+          "required": [
+            "affected_meter"
+          ],
+          "properties": {
+            "drift_fields": {
+              "type": "string",
+              "default": "firmware_version",
+              "description": "Comma-separated changed fields (firmware_version, crypto_key, esp_config, display_brightness)."
+            },
+            "change_ticket": {
+              "type": "string",
+              "default": "",
+              "description": "Authorized change ticket, if any. Empty = no approved change on record (unauthorized)."
+            },
+            "affected_meter": {
+              "type": "string",
+              "default": "SM-electric-0001",
+              "description": "Meter whose golden baseline drifted / that reported a tamper."
+            }
+          }
+        }
+      }
+    }
+  ],
+  "description": "Automation Orchestrator version of the AMI Golden Meter demo for utilities. A meter tamper / baseline variance is validated by OPA, triaged by an AI agent that determines whether the change is a bad actor or an authorized change, routed by the OPA policy verdict (the AI recommends; OPA decides), gated by human approval for critical assets, escalated to a CIP-008 incident for a suspected bad actor, remediated by rollback, and closed with signed (CAA) evidence.",
+  "schema_version": "2.0.0"
+}

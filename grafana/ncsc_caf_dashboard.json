@@ -1,0 +1,1310 @@
+{
+  "title": "NCSC CAF 4.0 Compliance Dashboard",
+  "uid": "ncsc-caf-001",
+  "tags": [
+    "ncsc-caf",
+    "compliance",
+    "uk",
+    "cni"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 2,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "hostname",
+        "type": "query",
+        "label": "Host",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "aac-compliance-db"
+        },
+        "query": "SELECT DISTINCT hostname FROM compliance_results WHERE policy_name = 'ncsc_caf_4' ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CAF Achievement %",
+      "description": "Percentage of Contributing Outcomes at 'achieved' level",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 40
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT compliance_percentage AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "COs Achieved",
+      "description": "Contributing Outcomes at full 'achieved' level",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 8
+              },
+              {
+                "color": "green",
+                "value": 18
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT passed_controls AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Partially Achieved",
+      "description": "COs meeting minimum but not all criteria",
+      "gridPos": {
+        "x": 11,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT (metadata->'co_achievements'->>'partially_achieved')::integer AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Not Achieved",
+      "description": "COs failing minimum criteria",
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT failed_controls AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Last Assessment",
+      "description": "Timestamp of most recent assessment",
+      "gridPos": {
+        "x": 19,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsLocal",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": 0
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "auto",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT EXTRACT(EPOCH FROM evaluation_timestamp) * 1000 AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Principle Compliance",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "A3 Asset Management",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 6,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Compliant",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Non-Compliant",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT CASE WHEN (metadata->'principle_results'->>'A3')::boolean THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "B2 Identity & Access",
+      "gridPos": {
+        "x": 6,
+        "y": 5,
+        "w": 6,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Compliant",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Non-Compliant",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT CASE WHEN (metadata->'principle_results'->>'B2')::boolean THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "B3 Data Security",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 6,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Compliant",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Non-Compliant",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT CASE WHEN (metadata->'principle_results'->>'B3')::boolean THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "B4 System Security",
+      "gridPos": {
+        "x": 18,
+        "y": 5,
+        "w": 6,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Compliant",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Non-Compliant",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT CASE WHEN (metadata->'principle_results'->>'B4')::boolean THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "B5 Resilience",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 8,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Compliant",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Non-Compliant",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT CASE WHEN (metadata->'principle_results'->>'B5')::boolean THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "C1 Security Monitoring",
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 8,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Compliant",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Non-Compliant",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT CASE WHEN (metadata->'principle_results'->>'C1')::boolean THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "D1 Response & Recovery",
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Compliant",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Non-Compliant",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT CASE WHEN (metadata->'principle_results'->>'D1')::boolean THEN 1 ELSE 0 END AS value FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND hostname IN ($hostname) ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "id": 25,
+      "title": "Phase 2 \u2014 Governance & Organisational COs",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "aac-compliance-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 4
+              },
+              {
+                "color": "green",
+                "value": 7
+              }
+            ]
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 48
+      },
+      "id": 26,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  7 - COUNT(*) AS value\nFROM (\n  SELECT jsonb_array_elements_text(violations) AS co\n  FROM compliance_results\n  WHERE framework = 'ncsc_caf_4'\n    AND hostname IN ($hostname)\n  ORDER BY evaluation_timestamp DESC\n  LIMIT 1\n) sub\nWHERE co IN ('A3.a','B5.a','C1.d','C1.f','D1.a','D1.b','D1.c')",
+          "refId": "A"
+        }
+      ],
+      "title": "Phase 2 COs Achieved",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "aac-compliance-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 48
+      },
+      "id": 27,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  ROUND((7 - COUNT(*))::numeric / 7 * 100, 0) AS value\nFROM (\n  SELECT jsonb_array_elements_text(violations) AS co\n  FROM compliance_results\n  WHERE framework = 'ncsc_caf_4'\n    AND hostname IN ($hostname)\n  ORDER BY evaluation_timestamp DESC\n  LIMIT 1\n) sub\nWHERE co IN ('A3.a','B5.a','C1.d','C1.f','D1.a','D1.b','D1.c')",
+          "refId": "A"
+        }
+      ],
+      "title": "Phase 2 Achievement %",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "aac-compliance-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "achievement"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "achieved": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "not_achieved": {
+                        "color": "red",
+                        "index": 2
+                      },
+                      "partially_achieved": {
+                        "color": "orange",
+                        "index": 1
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 16,
+        "x": 8,
+        "y": 48
+      },
+      "id": 28,
+      "options": {
+        "footer": {
+          "enablePagination": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest AS (\n  SELECT violations\n  FROM compliance_results\n  WHERE framework = 'ncsc_caf_4'\n    AND hostname IN ($hostname)\n  ORDER BY evaluation_timestamp DESC\n  LIMIT 1\n),\nnot_achieved AS (\n  SELECT jsonb_array_elements_text(violations) AS co FROM latest\n)\nSELECT\n  co,\n  CASE\n    WHEN co IN ('A3.a') THEN 'Asset Management'\n    WHEN co IN ('B5.a') THEN 'Resilience'\n    WHEN co IN ('C1.d','C1.f') THEN 'Security Monitoring'\n    WHEN co IN ('D1.a','D1.b','D1.c') THEN 'Response & Recovery'\n  END AS principle,\n  CASE\n    WHEN co IN (SELECT co FROM not_achieved WHERE co IN ('A3.a','B5.a','C1.d','C1.f','D1.a','D1.b','D1.c')) THEN 'not_achieved'\n    ELSE 'achieved'\n  END AS achievement\nFROM (VALUES ('A3.a'),('B5.a'),('C1.d'),('C1.f'),('D1.a'),('D1.b'),('D1.c')) t(co)",
+          "refId": "A"
+        }
+      ],
+      "title": "Phase 2 Governance CO Status",
+      "type": "table"
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Contributing Outcome Achievement",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "CO Achievement Status \u2014 All 23 Contributing Outcomes",
+      "description": "Colour-coded achievement per CO for the latest assessment run. Green = Achieved, Orange = Partially Achieved, Red = Not Achieved.",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 14
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Not Achieved",
+                        "color": "red"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "1": {
+                        "text": "Partially Achieved",
+                        "color": "orange"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "2": {
+                        "text": "Achieved",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CO"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 60
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Principle"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "WITH latest AS (\n  SELECT violations, metadata->'partially_achieved_cos' AS partial_cos\n  FROM compliance_results\n  WHERE policy_name = 'ncsc_caf_4'\n  AND hostname IN ($hostname)\n  ORDER BY evaluation_timestamp DESC LIMIT 1\n),\nco_list(co, principle, description) AS (\n  VALUES\n    ('A3.a','A3','Asset Register'),\n    ('B2.a','B2','MFA Enforcement'),\n    ('B2.b','B2','Device Management'),\n    ('B2.c','B2','Privileged Access'),\n    ('B2.d','B2','Identity & Access Mgmt'),\n    ('B3.b','B3','Data in Transit'),\n    ('B3.c','B3','Stored Data'),\n    ('B3.d','B3','Mobile Data'),\n    ('B4.a','B4','Secure by Design'),\n    ('B4.b','B4','Secure Configuration'),\n    ('B4.c','B4','Secure Management'),\n    ('B4.d','B4','Vulnerability Management'),\n    ('B5.a','B5','Resilience Preparation'),\n    ('B5.b','B5','Design for Resilience'),\n    ('B5.c','B5','Backups'),\n    ('C1.a','C1','Logging Sources'),\n    ('C1.b','C1','Securing Logs'),\n    ('C1.c','C1','Generating Alerts'),\n    ('C1.d','C1','Alert Triage'),\n    ('C1.f','C1','Threat Intelligence'),\n    ('D1.a','D1','Response Planning'),\n    ('D1.b','D1','Response Capability'),\n    ('D1.c','D1','Exercises & Testing')\n)\nSELECT\n  c.principle AS \"Principle\",\n  c.co AS \"CO\",\n  c.description AS \"Description\",\n  CASE\n    WHEN l.violations ? c.co     THEN 0\n    WHEN l.partial_cos ? c.co    THEN 1\n    ELSE 2\n  END AS \"Status\"\nFROM co_list c, latest l\nORDER BY c.co",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Trends & Multi-Host Comparison",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Achievement % Over Time",
+      "description": "CAF achievement percentage trend per host",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 14,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 40
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "always",
+            "pointSize": 6
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT evaluation_timestamp AS time, compliance_percentage AS \"Achievement %\", metadata->>'hostname' AS metric FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND $__timeFilter(evaluation_timestamp) ORDER BY evaluation_timestamp ASC",
+          "format": "time_series",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "bargauge",
+      "title": "Achievement % by Host (Latest)",
+      "description": "Most recent CAF achievement score per assessed host",
+      "gridPos": {
+        "x": 14,
+        "y": 27,
+        "w": 10,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 40
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "rawSql": "SELECT DISTINCT ON (metadata->>'hostname') metadata->>'hostname' AS metric, compliance_percentage AS \"Achievement %\" FROM compliance_results WHERE policy_name = 'ncsc_caf_4' AND $__timeFilter(evaluation_timestamp) ORDER BY metadata->>'hostname', evaluation_timestamp DESC",
+          "format": "table",
+          "rawQuery": true
+        }
+      ]
+    }
+  ]
+}

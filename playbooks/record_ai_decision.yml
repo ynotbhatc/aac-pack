@@ -1,0 +1,174 @@
+---
+# Record AI Decision — write one governance decision into ai_action_log.
+#
+# Third channel of the decision log (see ansible/files/ai_action_log_schema.sql):
+#   channel = 'mcp'          → per-tool-call verdicts (services/mcp-server/server_opa.py)
+#   channel = 'action_layer' → named-action verdicts (ai_governance_check.yml)
+#   channel = 'ao_gate'      → THIS playbook: workflow-level policy-gate verdicts
+#                              from an Automation Orchestrator (or any) workflow
+#                              where a policy engine routed an agent's
+#                              recommendation (and possibly overrode it).
+#
+# Called as a workflow node right after the OPA gate, so the decision that
+# governed the run is durably recorded beside the MCP tool-call log — same
+# append-only table, same "denies are signal" posture. An override lands with
+# allow=false (the agent's OWN intent was blocked), which puts it on the
+# idx_ai_action_log_denies index: a rising override rate for an agent is the
+# alarm, exactly like a rising tool-denial rate.
+#
+# ── Required extra_vars (deliberately NOT defaulted) ─────────────────────────
+#   trace_id           UUID tying the row to the source run (AO execution id
+#                      or the gate's decision id).
+#   agent_identity     Which agent/workflow was governed, e.g. "mythos-triage".
+#   gate_action        What was being decided, e.g. "patch_route".
+#   agent_recommended  The route/action the AI recommended.
+#   policy_route       The route the policy engine decided.
+#   policy_reasons     List (or string) of the policy's stated reasons.
+#   overrode_agent     Strict boolean (true/false) — did policy override the
+#                      agent's recommendation? Non-boolean input fails closed.
+#
+# ── Optional extra_vars ──────────────────────────────────────────────────────
+#   decision_ref       Policy engine's decision id (OPA decision_id) for replay.
+#   risk_level         e.g. CRITICAL (from the assess artifacts).
+#   target_environment Environment label. Default: unspecified.
+#   agent_reasoning    The agent's own stated reasoning (stored verbatim).
+#
+# ── Connection (HIGH — supply via site_config/credential/extra_vars) ─────────
+#   pg_host                    Compliance DB host. From site_config.yml when the
+#                              checkout has one (it is gitignored — AAP project
+#                              checkouts intentionally do not), else extra_vars.
+#   pg_port / pg_db / pg_user  Honored from site_config when set; default to the
+#                              repo-standard 5432 / compliance / postgres.
+#   pg_password (or compliance_db_password)  DB password from vault_secrets.yml,
+#                              an AAP credential, or extra_vars. Omitted → trust
+#                              auth (in-cluster exec path).
+#
+# AAP Job Template: "AAC - Record AI Decision" (inventory localhost, AAC EE;
+# prompt-on-launch for extra_vars).
+
+- name: Record an AI governance decision in ai_action_log
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # site_config.yml / vault_secrets.yml are gitignored by design
+    # (scripts/aac-configure.sh generates them) — AAP project checkouts do not
+    # carry them, so load optionally and fall back to extra_vars.
+    - name: Load site config if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/site_config.yml'], errors='ignore') }}"
+
+    - name: Load vault secrets if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/vault_secrets.yml'], errors='ignore') }}"
+      no_log: true
+
+    - name: Require a database host
+      ansible.builtin.assert:
+        that:
+          - pg_host is defined and (pg_host | default('', true)) | length > 0
+        fail_msg: >-
+          pg_host is not set. Supply it via site_config.yml or extra_vars —
+          record_ai_decision has no environment-specific default.
+
+    - name: Require the decision context (an unlogged decision is not permitted)
+      ansible.builtin.assert:
+        that:
+          - trace_id is defined and trace_id | length > 0
+          - agent_identity is defined and agent_identity | length > 0
+          - gate_action is defined and gate_action | length > 0
+          - agent_recommended is defined and agent_recommended | length > 0
+          - policy_route is defined and policy_route | length > 0
+          # Reasons must actually explain the verdict — a decision without a
+          # "why" contradicts the log's contract. String or list accepted; an
+          # empty string, empty list, or list of blanks is refused: if a policy
+          # routes with no stated reason, fix the policy, don't log silence.
+          - policy_reasons is defined
+          - policy_reasons is string or policy_reasons is sequence
+          # Fail closed on non-boolean input: `| bool` would silently map an
+          # unrecognized token to false and record an override as allow=true.
+          - overrode_agent is defined
+          - (overrode_agent | string | lower) in ['true', 'false']
+        fail_msg: >-
+          record_ai_decision requires trace_id, agent_identity, gate_action,
+          agent_recommended, policy_route, policy_reasons, and a strictly
+          boolean overrode_agent (true/false). Refusing to write a partial or
+          ambiguous decision record.
+
+    - name: Normalize the reasons to one text field
+      ansible.builtin.set_fact:
+        reasons_text: >-
+          {{ policy_reasons | trim if policy_reasons is string
+             else policy_reasons | map('string') | map('trim') | reject('equalto', '') | join('; ') }}
+
+    - name: Refuse a decision record with no stated reasons
+      ansible.builtin.assert:
+        that:
+          - reasons_text | length > 0
+        fail_msg: >-
+          policy_reasons is empty — the policy engine returned a verdict with no
+          stated reason. Refusing to log an unexplained decision; give the
+          policy an explicit reason (even the auto route should say why it
+          qualified) and re-run.
+
+    # Connection honors the site_config contract (pg_host/pg_port/pg_db/pg_user,
+    # password from vault as pg_password or compliance_db_password) with the
+    # repo-standard defaults, so a customer profile with a non-default role,
+    # database, or port reaches the right target.
+    - name: Ensure the AI governance decision-log schema exists
+      community.postgresql.postgresql_script:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        path: "{{ playbook_dir }}/../files/ai_action_log_schema.sql"
+
+    - name: Record the gate decision
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        # Parameterized (%(name)s) — gate outputs and agent text are
+        # model-influencable content; never Jinja-interpolate into SQL.
+        query: |
+          INSERT INTO ai_action_log (
+            trace_id, channel, agent_identity, action,
+            risk_level, decision, allow, reason,
+            environment, reasoning, decision_ref
+          )
+          VALUES (
+            %(trace_id)s::uuid, 'ao_gate', %(agent_identity)s, %(gate_action)s,
+            NULLIF(%(risk_level)s, ''), %(decision)s, %(allow)s, %(reason)s,
+            %(environment)s, NULLIF(%(reasoning)s, ''), NULLIF(%(decision_ref)s, '')
+          )
+          RETURNING id
+        named_args:
+          trace_id: "{{ trace_id }}"
+          agent_identity: "{{ agent_identity }}"
+          gate_action: "{{ gate_action }}"
+          risk_level: "{{ risk_level | default('') }}"
+          decision: "{{ policy_route }}"
+          # allow=false when policy overrode the agent: the agent's own intent
+          # was blocked — that is the row the denies index exists to surface.
+          # Safe to coerce here: the assert above already proved true/false.
+          allow: "{{ not (overrode_agent | bool) }}"
+          reason: "{{ reasons_text }}"
+          environment: "{{ target_environment | default('unspecified') }}"
+          reasoning: >-
+            {{ ('agent recommended: ' ~ agent_recommended ~
+                ((('; agent reasoning: ' ~ agent_reasoning)
+                  if (agent_reasoning | default('') | length > 0) else ''))) }}
+          decision_ref: "{{ decision_ref | default('') }}"
+      register: decision_row
+
+    - name: Report the recorded decision
+      ansible.builtin.debug:
+        msg: >-
+          ai_action_log id {{ decision_row.query_result[0].id }}: channel=ao_gate
+          {{ agent_identity }} {{ gate_action }} → policy route '{{ policy_route }}'
+          ({{ 'OVERRODE agent (' ~ agent_recommended ~ ')' if overrode_agent | bool
+              else 'ratified agent recommendation' }}); trace {{ trace_id }}.

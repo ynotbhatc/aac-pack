@@ -1,0 +1,341 @@
+---
+# simulate_patch_lifecycle.yml — score patch exposure and rebuild the heat map
+#
+# Implements docs/patch_remediation_lifecycle.md §5 (heat-map aggregation) and
+# Stage 6 (risk tiering) — both marked NOT BUILT in §12.
+#
+# ===========================================================================
+# WHAT IS REAL AND WHAT IS SIMULATED — read this before showing anyone output
+# ===========================================================================
+# REAL:
+#   - the estate: hosts, components, installed versions (observed inventory)
+#   - the worklist: which systems and components are affected
+#   - the risk FORMULA and its parameters (documented, table-driven, auditable)
+#   - the SLA clocks: CISA BOD 22-01, NERC CIP-007-6, PCI DSS v4.0, FedRAMP
+#   - support status / EOL, where resolved
+#
+# SIMULATED (because vendor remediation enrichment is not built):
+#   - fix_available_at — when the vendor shipped the fix. Nothing supplies this,
+#     and the age factor depends on it. Synthesized deterministically from the
+#     CVE id so the same CVE always yields the same date and the demo is
+#     reproducible rather than shifting every run.
+#   - fixed_version, where absent.
+#
+# Every simulated row is flagged is_simulated=true and carries a note. The heat
+# map cells inherit the flag. Nothing here may be presented as measured exposure.
+#
+# simulate=false scores ONLY rows whose fix metadata is real. On today's data
+# that produces an empty heat map — which is the honest answer, and is exactly
+# why the simulation exists.
+#
+# AAP Job Template: "AAC - Simulate Patch Risk and Heat Map"
+# Credentials: Ansible Vault    EE: AAC Compliance EE
+
+- name: Score patch exposure and rebuild the heat map
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - [ "../vars/vault_secrets.yml", "../vars/empty_fallback.yml" ]
+    - ../vars/site_config.yml
+
+  vars:
+    pg_port: "{{ compliance_db_port | default(5432) }}"
+    pg_db: "compliance"
+    pg_user: "postgres"
+    pg_password: "{{ compliance_db_password }}"
+
+    # Synthesize missing fix metadata so the unbuilt stages can be demonstrated
+    simulate: "{{ simulate_missing | default(true) | bool }}"
+    hourly_rate: "{{ rate_usd | default(185) | int }}"
+
+  tasks:
+
+    - name: Ensure the risk and heat-map schema exists
+      community.postgresql.postgresql_script:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        path: "{{ playbook_dir }}/../files/patch_risk_schema.sql"
+
+    - name: Confirm there is a worklist to score
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          SELECT count(*) AS items,
+                 count(*) FILTER (WHERE fixed_version IS NOT NULL AND fixed_version <> '') AS with_fix,
+                 count(DISTINCT hostname) AS hosts
+            FROM patch_worklist
+      register: pre
+
+    - name: Stop when there is nothing to score
+      ansible.builtin.fail:
+        msg: >-
+          patch_worklist is empty. Run the identification node first — there is nothing
+          to score, and an empty heat map here would mean "we never looked", not "you
+          are clean".
+      # NOTE: bracket access is REQUIRED. `items` is a dict method in Python, so
+      # `result[0].items` resolves the bound method rather than the column and
+      # `| int` silently yields 0 — this guard fired on a 1,445-row work list.
+      when: pre.query_result[0]['items'] | int == 0
+
+    - name: Report what will be scored
+      ansible.builtin.debug:
+        msg:
+          - "Work items          : {{ pre.query_result[0]['items'] }}"
+          - "With real fix data  : {{ pre.query_result[0].with_fix }}"
+          - "Hosts               : {{ pre.query_result[0].hosts }}"
+          - "Simulation enabled  : {{ simulate }}"
+
+    - name: Warn when simulation is off and there is no real fix data
+      when:
+        - not simulate
+        - pre.query_result[0].with_fix | int == 0
+      ansible.builtin.debug:
+        msg: >-
+          simulate=false and ZERO work items carry real fix metadata. The heat map will
+          be empty. That is the correct, honest result — vendor remediation enrichment
+          (§13 build-sequence #1) has not run. Set simulate=true to demonstrate the
+          scoring and aggregation with synthesized fix dates, clearly flagged.
+
+    # =========================================================================
+    # RISK SCORING
+    # =========================================================================
+    - name: Clear the previous scoring round
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: "TRUNCATE patch_risk_scores"
+
+    - name: Score every finding
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          WITH p AS (
+            SELECT param_group, param_key, param_value FROM patch_risk_parameters
+          ),
+          est AS (SELECT count(DISTINCT hostname)::numeric AS total_hosts FROM installed_inventory),
+          base AS (
+            SELECT w.hostname, w.cve_id, w.product, w.installed_version,
+                   UPPER(COALESCE(NULLIF(w.severity,''),'UNKNOWN')) AS sev,
+                   COALESCE(w.kev_member,false) AS kev,
+                   w.fixed_version,
+                   -- Fix availability drives the age factor. Preferred source is
+                   -- the vendor remediation's available_at — the date action became
+                   -- possible. Only synthesized when that is absent AND simulate=true.
+                   CASE
+                     WHEN vr.available_at IS NOT NULL THEN vr.available_at
+                     WHEN %(sim)s AND w.fixed_version IS NOT NULL AND w.fixed_version <> ''
+                       THEN now() - make_interval(days => (abs(hashtext(w.cve_id)) %% 180) + 3)
+                     ELSE NULL
+                   END AS fix_at,
+                   (vr.available_at IS NULL) AS synthesized,
+                   -- support status: does a fix even exist?
+                   COALESCE(hs.lifecycle_stage,'unknown') AS lifecycle
+              FROM patch_worklist w
+              LEFT JOIN cve_vendor_remediations vr ON vr.cve_id = w.cve_id
+              LEFT JOIN host_support_status hs
+                     ON hs.hostname = w.hostname AND lower(hs.product) = lower(w.product)
+          ),
+          breadth AS (
+            SELECT cve_id, product, count(DISTINCT hostname)::numeric AS hosts_affected
+              FROM base GROUP BY cve_id, product
+          ),
+          scored AS (
+            SELECT b.*,
+                   br.hosts_affected,
+                   (SELECT param_value FROM p WHERE param_group='severity_weight' AND param_key=b.sev) AS sw,
+                   (SELECT param_value FROM p WHERE param_group='kev_multiplier'
+                     AND param_key = CASE WHEN b.kev THEN 'kev' ELSE 'non_kev' END) AS km,
+                   CASE
+                     WHEN b.kev            THEN (SELECT param_value FROM p WHERE param_group='sla_days' AND param_key='kev')
+                     WHEN b.sev='CRITICAL' THEN (SELECT param_value FROM p WHERE param_group='sla_days' AND param_key='critical')
+                     WHEN b.sev='HIGH'     THEN (SELECT param_value FROM p WHERE param_group='sla_days' AND param_key='high')
+                     WHEN b.sev='MEDIUM'   THEN (SELECT param_value FROM p WHERE param_group='sla_days' AND param_key='medium')
+                     ELSE                       (SELECT param_value FROM p WHERE param_group='sla_days' AND param_key='low')
+                   END AS sla,
+                   CASE WHEN b.fix_at IS NULL THEN NULL
+                        ELSE GREATEST(0, EXTRACT(EPOCH FROM (now() - b.fix_at))/86400)::numeric
+                   END AS days_since_fix,
+                   (SELECT total_hosts FROM est) AS total_hosts
+              FROM base b JOIN breadth br ON br.cve_id=b.cve_id AND br.product=b.product
+          ),
+          factored AS (
+            SELECT s.*,
+                   -- age_factor: 1 at the moment the fix shipped, growing past SLA, capped
+                   LEAST(
+                     (SELECT param_value FROM p WHERE param_group='age_factor' AND param_key='max'),
+                     CASE WHEN s.days_since_fix IS NULL THEN 1.0
+                          ELSE 1.0 + (s.days_since_fix / NULLIF(s.sla,0)) END
+                   ) AS age_f,
+                   -- breadth: how much of the estate carries it, capped
+                   LEAST(
+                     (SELECT param_value FROM p WHERE param_group='breadth' AND param_key='max'),
+                     1.0 + (s.hosts_affected / NULLIF(s.total_hosts,0)) * 2.0
+                   ) AS breadth_f
+              FROM scored s
+          )
+          INSERT INTO patch_risk_scores
+            (hostname, cve_id, product, installed_version, severity, kev_member,
+             severity_weight, kev_multiplier, age_factor, breadth_factor,
+             fix_available_at, days_since_fix, sla_days, sla_state, valley_type,
+             debt_category, risk_score, risk_tier, is_simulated, simulation_note)
+          SELECT
+            f.hostname, f.cve_id, f.product, f.installed_version, f.sev, f.kev,
+            f.sw, f.km, round(f.age_f,3), round(f.breadth_f,3),
+            f.fix_at,
+            round(f.days_since_fix)::int,
+            round(f.sla)::int,
+            CASE
+              WHEN f.lifecycle IN ('unsupported','obsolete','orphaned') THEN 'no_fix'
+              WHEN f.days_since_fix IS NULL                            THEN 'no_fix'
+              WHEN f.days_since_fix > f.sla                            THEN 'breached'
+              WHEN f.days_since_fix > (f.sla * 0.75)                   THEN 'at_risk'
+              ELSE 'attained'
+            END,
+            -- valley type
+            CASE
+              WHEN f.lifecycle IN ('unsupported','obsolete','orphaned') THEN 'support'
+              WHEN f.days_since_fix IS NULL                            THEN 'coverage'
+              WHEN f.days_since_fix > f.sla                            THEN 'exposure'
+              ELSE 'currency'
+            END,
+            -- fold into the EXISTING debt categories. No seventh category.
+            CASE
+              WHEN f.lifecycle IN ('unsupported','obsolete','orphaned') THEN 'technology_lifecycle'
+              ELSE 'security'
+            END,
+            round((f.sw * f.km * f.age_f * f.breadth_f)::numeric, 2),
+            CASE
+              WHEN (f.sw*f.km*f.age_f*f.breadth_f) >= (SELECT param_value FROM p WHERE param_group='risk_tier' AND param_key='tier3_min') THEN 3
+              WHEN (f.sw*f.km*f.age_f*f.breadth_f) >= (SELECT param_value FROM p WHERE param_group='risk_tier' AND param_key='tier2_min') THEN 2
+              WHEN (f.sw*f.km*f.age_f*f.breadth_f) >= (SELECT param_value FROM p WHERE param_group='risk_tier' AND param_key='tier1_min') THEN 1
+              ELSE 0
+            END,
+            f.synthesized,
+            CASE WHEN f.synthesized
+                 THEN 'fix_available_at and fixed_version SYNTHESIZED — vendor remediation enrichment not built. Deterministic from CVE id for reproducibility.'
+                 ELSE NULL END
+          FROM factored f
+          WHERE %(sim)s OR NOT f.synthesized
+        named_args:
+          sim: "{{ simulate }}"
+      register: scoring
+
+    # =========================================================================
+    # HEAT MAP AGGREGATION
+    # =========================================================================
+    - name: Rebuild the heat map cells
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          INSERT INTO patch_heatmap_cells
+            (debt_category, valley_type, hosts, findings, kev_findings, unpatched,
+             effort_hours, cost_usd, risk_total, risk_max, sla_breached,
+             exposure_days, is_simulated)
+          SELECT
+            r.debt_category,
+            r.valley_type,
+            count(DISTINCT r.hostname),
+            count(*),
+            count(*) FILTER (WHERE r.kev_member),
+            count(*),                              -- every scored finding is unpatched by definition
+            round(count(*) * 0.5, 1),              -- 30 min per host x component, the documented default
+            round(count(*) * 0.5 * %(rate)s, 2),
+            round(sum(r.risk_score), 2),
+            round(max(r.risk_score), 2),
+            count(*) FILTER (WHERE r.sla_state = 'breached'),
+            round(COALESCE(sum(GREATEST(0, r.days_since_fix - r.sla_days)), 0), 1),
+            bool_or(r.is_simulated)
+          FROM patch_risk_scores r
+          WHERE r.scored_at = (SELECT max(scored_at) FROM patch_risk_scores)
+          GROUP BY r.debt_category, r.valley_type
+        named_args:
+          rate: "{{ hourly_rate | int }}"
+
+    - name: Read the heat map
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          SELECT debt_category, valley_type, hosts, findings, kev_findings,
+                 sla_breached, effort_hours, cost_usd, risk_total, risk_max, is_simulated
+            FROM patch_heatmap_latest
+           ORDER BY risk_total DESC
+      register: heat
+
+    - name: Read the top unpatched systems
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: "SELECT * FROM patch_unpatched_systems ORDER BY risk_total DESC LIMIT 15"
+      register: unpatched
+
+    - name: Totals
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: "{{ pg_user }}"
+        login_password: "{{ pg_password }}"
+        login_db: "{{ pg_db }}"
+        query: |
+          SELECT count(*) AS findings,
+                 count(DISTINCT hostname) AS hosts,
+                 count(*) FILTER (WHERE kev_member) AS kev,
+                 count(*) FILTER (WHERE sla_state='breached') AS breached,
+                 count(*) FILTER (WHERE risk_tier=3) AS tier3,
+                 round(sum(risk_score),1) AS risk_total,
+                 bool_or(is_simulated) AS simulated
+            FROM patch_risk_scores
+           WHERE scored_at = (SELECT max(scored_at) FROM patch_risk_scores)
+      register: totals
+
+    - name: Heat map summary
+      vars:
+        t: "{{ totals.query_result[0] }}"
+      ansible.builtin.debug:
+        msg:
+          - "──────────────────────────────────────────────────────────"
+          - "PATCH EXPOSURE HEAT MAP"
+          - "──────────────────────────────────────────────────────────"
+          - "Findings scored : {{ t.findings }}"
+          - "Unpatched hosts : {{ t.hosts }}"
+          - "KEV (exploited) : {{ t.kev }}"
+          - "SLA breached    : {{ t.breached }}"
+          - "Risk tier 3     : {{ t.tier3 }}"
+          - "Total risk      : {{ t.risk_total }}"
+          - "──────────────────────────────────────────────────────────"
+          - "{{ 'SIMULATED — fix dates synthesized. NOT measured exposure.' if t.simulated else 'All inputs measured.' }}"
+          - "──────────────────────────────────────────────────────────"
+
+    - name: Heat map cells
+      ansible.builtin.debug:
+        var: heat.query_result
+
+    - name: Unpatched systems
+      ansible.builtin.debug:
+        var: unpatched.query_result

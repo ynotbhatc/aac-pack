@@ -1,0 +1,587 @@
+{
+  "panels": [
+    {
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "NON-COMPLIANT"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "COMPLIANT"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                SELECT EXTRACT(EPOCH FROM evaluation_timestamp)*1000 AS time,\n                       CASE WHEN (metadata->>'compliant')::boolean IS TRUE THEN 1 ELSE 0 END AS value\n                FROM compliance_results\n                WHERE policy_name IN ('AMI Head-End Security', 'AMI Device Compliance', 'AMI NIST IR 7628 Rev 1')\n                ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Overall Compliance (Latest)",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                SELECT EXTRACT(EPOCH FROM MAX(evaluation_timestamp))*1000 AS time,\n                       ROUND(AVG(compliance_percentage), 1) AS value\n                FROM compliance_results\n                WHERE policy_name IN ('AMI Head-End Security', 'AMI Device Compliance', 'AMI NIST IR 7628 Rev 1')\n                  AND evaluation_timestamp = (SELECT MAX(evaluation_timestamp) FROM compliance_results WHERE policy_name IN ('AMI Head-End Security', 'AMI Device Compliance', 'AMI NIST IR 7628 Rev 1'))",
+          "refId": "A"
+        }
+      ],
+      "title": "Average Compliance Score (Latest)",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                SELECT NOW() AS time,\n                       COUNT(*) AS value\n                FROM compliance_results\n                WHERE policy_name IN ('AMI Head-End Security', 'AMI Device Compliance', 'AMI NIST IR 7628 Rev 1')\n                  AND evaluation_timestamp > NOW() - INTERVAL '30 days'",
+          "refId": "A"
+        }
+      ],
+      "title": "Assessments (30 Days)",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                SELECT EXTRACT(EPOCH FROM evaluation_timestamp)*1000 AS time,\n                       SUM(failed_controls) AS value\n                FROM compliance_results\n                WHERE policy_name IN ('AMI Head-End Security', 'AMI Device Compliance', 'AMI NIST IR 7628 Rev 1')\n                  AND evaluation_timestamp >= (\n                      SELECT MAX(evaluation_timestamp) - INTERVAL '5 minutes'\n                      FROM compliance_results WHERE policy_name IN ('AMI Head-End Security', 'AMI Device Compliance', 'AMI NIST IR 7628 Rev 1'))\n                GROUP BY evaluation_timestamp\n                ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Failed Controls (Latest Run)",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2
+          },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AMI Head-End Security"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#1A7348",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AMI NIST IR 7628 Rev 1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#0077CC",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AMI Device Compliance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#E88C00",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                    SELECT evaluation_timestamp AS time,\n                           compliance_percentage AS \"AMI Head-End Security\"\n                    FROM compliance_results\n                    WHERE policy_name = 'AMI Head-End Security'\n                      AND evaluation_timestamp > NOW() - INTERVAL '30 days'\n                    ORDER BY evaluation_timestamp",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                    SELECT evaluation_timestamp AS time,\n                           compliance_percentage AS \"AMI NIST IR 7628 Rev 1\"\n                    FROM compliance_results\n                    WHERE policy_name = 'AMI NIST IR 7628 Rev 1'\n                      AND evaluation_timestamp > NOW() - INTERVAL '30 days'\n                    ORDER BY evaluation_timestamp",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                    SELECT evaluation_timestamp AS time,\n                           compliance_percentage AS \"AMI Device Compliance\"\n                    FROM compliance_results\n                    WHERE policy_name = 'AMI Device Compliance'\n                      AND evaluation_timestamp > NOW() - INTERVAL '30 days'\n                    ORDER BY evaluation_timestamp",
+          "refId": "C"
+        }
+      ],
+      "title": "AMI Compliance Score Trend (30 Days)",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
+      "id": 6,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                SELECT EXTRACT(EPOCH FROM evaluation_timestamp)*1000 AS time,\n                       compliance_percentage AS value\n                FROM compliance_results\n                WHERE policy_name = 'AMI NIST IR 7628 Rev 1'\n                ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "NIST IR 7628 Score",
+      "type": "gauge"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
+      "id": 7,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                SELECT EXTRACT(EPOCH FROM evaluation_timestamp)*1000 AS time,\n                       compliance_percentage AS value\n                FROM compliance_results\n                WHERE policy_name = 'AMI Head-End Security'\n                ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "AMI Head-End Security Score",
+      "type": "gauge"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "id": 8,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "time_series",
+          "rawSql": "\n                SELECT EXTRACT(EPOCH FROM evaluation_timestamp)*1000 AS time,\n                       compliance_percentage AS value\n                FROM compliance_results\n                WHERE policy_name = 'AMI Device Compliance'\n                ORDER BY evaluation_timestamp DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Device Compliance Score",
+      "type": "gauge"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Score"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Compliant"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "false": {
+                        "color": "red",
+                        "text": "\u274c No"
+                      },
+                      "true": {
+                        "color": "green",
+                        "text": "\u2705 Yes"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 9,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "aac-compliance-db"
+          },
+          "format": "table",
+          "rawSql": "\n                SELECT evaluation_timestamp                         AS \"Time\",\n                       policy_name                                  AS \"Framework\",\n                       policy_version                               AS \"Version\",\n                       ROUND(compliance_percentage, 1)              AS \"Score\",\n                       total_controls                               AS \"Total\",\n                       passed_controls                              AS \"Passed\",\n                       failed_controls                              AS \"Failed\",\n                       (metadata->>'compliant')::text               AS \"Compliant\",\n                       metadata->>'utility'                         AS \"Utility\"\n                FROM compliance_results\n                WHERE policy_name IN ('AMI Head-End Security', 'AMI Device Compliance', 'AMI NIST IR 7628 Rev 1')\n                ORDER BY evaluation_timestamp DESC\n                LIMIT 30",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent AMI Assessments",
+      "type": "table"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "tags": [
+    "ami",
+    "nist-ir-7628",
+    "iec-62443",
+    "compliance"
+  ],
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "AMI / Smart Grid Compliance Dashboard",
+  "uid": "ami-001"
+}
