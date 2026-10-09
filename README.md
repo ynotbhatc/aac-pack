@@ -4,7 +4,7 @@
 policies, Automation Orchestrator workflow definitions, evidence-database
 schema and dashboards that partner demo platforms consume. Published from the
 private `ynotbhatc/compliance` repository by its `scripts/export_sales_demos_pack.py`;
-this copy is from commit `unknown` (committed unknown).
+this copy is from commit `130234815bc0` (committed 2026-10-09T01:58:41Z).
 **Pin a tag.** `main` moves with every sync; a tag never does.
 
 This repository is generated. Edit the source there; a change made here is

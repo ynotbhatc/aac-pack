@@ -2,9 +2,9 @@
 pack_version: 1
 source:
   repository: ynotbhatc/compliance
-  commit: ''
-  committed_at: ''
-  branch: ''
+  commit: 130234815bc0fd7b590ba38b67b7d80e9b089a56
+  committed_at: '2026-10-09T01:58:41Z'
+  branch: main
 files:
   LICENSE:
     source: LICENSE
