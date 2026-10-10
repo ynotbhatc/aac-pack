@@ -1,0 +1,235 @@
+---
+# golden_image_check.yml — compare a managed host's monitored golden file to
+# its approved baseline, over SSH.
+#
+# This is the product-tier shape of contrib/mac-aap/playbooks/
+# golden_image_check_macaap.yml, which reads a `demo-rhel9` CONTAINER through
+# the Kubernetes API. A platform whose hardened RHEL 9 targets are virtual
+# machines (sales.demos#883 part 3: CIS L1 golden-image CNV guests) cannot
+# k8s_exec into them, but AAP already reaches them over SSH — so this play
+# runs ON the target with the inventory's machine credential and keeps the
+# database work on the controller. No cluster credential, no service account.
+#
+# CONTRACT WITH THE AUTOMATION ORCHESTRATOR WORKFLOW (unchanged): the
+# `identify` node reads these set_stats artifacts and nothing else —
+#   any_drift, critical_drift, changed_files, baseline_compliant, drifted_key.
+# Keep their names and types exactly as they are.
+#
+# ── Required extra_vars ─────────────────────────────────────────────────────
+#   target_host   Inventory hostname of the VM (also the golden_image_baselines
+#                 hostname key). The play FAILS if it is not in the inventory:
+#                 "no hosts matched" would otherwise skip every task silently
+#                 and publish no artifacts.
+#   pg_host / pg_user / pg_db / pg_password (or compliance_db_password)
+#                 Evidence database. From site_config.yml / vault_secrets.yml
+#                 when the checkout has them (gitignored; AAP project checkouts
+#                 do not), else from a credential or extra_vars.
+# ── Optional ────────────────────────────────────────────────────────────────
+#   golden_file_key   Key in golden_files JSONB. Default: selinux_config.
+#                     The host path is derived from a map FIXED IN THIS FILE
+#                     (the five keys capture_baseline uses) and re-checked
+#                     against a literal list inside the privileged play, so no
+#                     launch-time variable can aim a root read or write at an
+#                     arbitrary file. To monitor another file, change the pack.
+#   fail_on_drift     true → the job FAILS on drift (the Enforcement
+#                     workflow's `verify` node). Default: false (the job stays
+#                     green and the policy decides).
+#   critical_keys     Keys whose drift is critical. Default: selinux_config,
+#                     sshd_config.
+#
+# AAP job template: "Compliance as Code - Golden Image Check" (sales.demos),
+# inventory with the VMs, machine credential, evidence-database credential.
+
+- name: Golden Image Check — resolve the target and its approved baseline
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load site config if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/site_config.yml'], errors='ignore') }}"
+
+    - name: Load vault secrets if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/vault_secrets.yml'], errors='ignore') }}"
+      no_log: true
+
+    - name: Require a target that the inventory knows
+      ansible.builtin.assert:
+        that:
+          - target_host is defined
+          - (target_host | default('', true)) | length > 0
+          - target_host in hostvars
+        fail_msg: >-
+          target_host='{{ target_host | default('') }}' is not a host in this
+          job's inventory. A play against an unknown host matches nothing,
+          skips every task and publishes no drift verdict — refusing instead.
+        quiet: true
+
+    - name: Require a database host
+      ansible.builtin.assert:
+        that:
+          - (pg_host | default('', true)) | length > 0
+        fail_msg: >-
+          pg_host is not set. Supply it via site_config.yml, an evidence-database
+          credential, or extra_vars — this playbook has no environment default.
+        quiet: true
+
+    - name: Fetch the current baseline for {{ target_host }}
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        query: |
+          SELECT id, baseline_label, captured_at, golden_files
+          FROM golden_image_baselines
+          WHERE hostname = %s AND is_current = true
+          ORDER BY captured_at DESC
+          LIMIT 1
+        positional_args:
+          - "{{ target_host }}"
+      register: golden_result
+
+    - name: Fail if no baseline exists for this host
+      ansible.builtin.fail:
+        msg: >-
+          No current row in golden_image_baselines for hostname='{{ target_host }}'.
+          Run "Golden Image Capture Baseline" against this host first.
+      when: golden_result.query_result | length == 0
+
+    - name: The golden file map — fixed in the playbook, never a launch variable
+      ansible.builtin.set_fact:
+        gi_files_map:
+          sshd_config: /etc/ssh/sshd_config
+          selinux_config: /etc/selinux/config
+          auditd_conf: /etc/audit/auditd.conf
+          audit_rules: /etc/audit/rules.d/99-cis.rules
+          sysctl_conf: /etc/sysctl.d/99-cis.conf
+
+    - name: Refuse a key outside the golden file map (the path is never free-form)
+      ansible.builtin.assert:
+        that:
+          - (golden_file_key | default('selinux_config')) in gi_files_map
+        fail_msg: >-
+          golden_file_key='{{ golden_file_key | default('selinux_config') }}' is not in
+          the golden file map fixed in this playbook; a launch-time variable can
+          never name an arbitrary file. To monitor another file, change the pack.
+        quiet: true
+
+    - name: Fail if the baseline has no entry for the monitored file
+      ansible.builtin.fail:
+        msg: >-
+          Baseline '{{ golden_result.query_result[0].baseline_label }}' for
+          {{ target_host }} has no '{{ golden_file_key | default('selinux_config') }}' key.
+          Keys present: {{ golden_result.query_result[0].golden_files.keys() | list }}.
+      when: (golden_file_key | default('selinux_config')) not in golden_result.query_result[0].golden_files
+
+    - name: Keep the baseline for the host play
+      ansible.builtin.set_fact:
+        gi_key: "{{ golden_file_key | default('selinux_config') }}"
+        gi_path: "{{ gi_files_map[golden_file_key | default('selinux_config')] }}"
+        gi_baseline_id: "{{ golden_result.query_result[0].id }}"
+        gi_baseline_label: "{{ golden_result.query_result[0].baseline_label }}"
+        gi_baseline_when: "{{ golden_result.query_result[0].captured_at }}"
+        gi_baseline_content: "{{ golden_result.query_result[0].golden_files[golden_file_key | default('selinux_config')] }}"
+
+- name: Golden Image Check — read the monitored file on the target
+  hosts: "{{ target_host | default('no-such-host') }}"
+  gather_facts: false
+  become: true
+  vars:
+    gi_target_path: "{{ hostvars['localhost'].gi_path }}"
+  tasks:
+    - name: Refuse any path outside the five golden files (literal list; a launch variable cannot widen it)
+      ansible.builtin.assert:
+        that:
+          - gi_target_path in ['/etc/ssh/sshd_config', '/etc/selinux/config', '/etc/audit/auditd.conf', '/etc/audit/rules.d/99-cis.rules', '/etc/sysctl.d/99-cis.conf']
+        fail_msg: "Refusing to touch '{{ gi_target_path }}' as root: not one of the golden files this play is allowed to handle."
+        quiet: true
+
+    - name: Read {{ hostvars['localhost'].gi_path }}
+      ansible.builtin.slurp:
+        src: "{{ gi_target_path }}"
+      register: gi_current
+
+    - name: Hand the content back to the controller
+      ansible.builtin.set_fact:
+        gi_current_text: "{{ gi_current.content | b64decode }}"
+
+- name: Golden Image Check — verdict, evidence and workflow artifacts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    gi_current_text: "{{ hostvars[target_host].gi_current_text }}"
+    is_drift_present: "{{ (gi_current_text | trim) != (gi_baseline_content | trim) }}"
+    gi_critical_keys: "{{ critical_keys | default(['selinux_config', 'sshd_config']) }}"
+  tasks:
+    - name: Publish the drift verdict as workflow stats (the AO `identify` artifacts)
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          any_drift: "{{ is_drift_present | bool }}"
+          critical_drift: "{{ (is_drift_present | bool) and (gi_key in gi_critical_keys) }}"
+          changed_files: "{{ [gi_path] if (is_drift_present | bool) else [] }}"
+          baseline_compliant: "{{ not (is_drift_present | bool) }}"
+          drifted_key: "{{ gi_key }}"
+
+    - name: Store the result as evidence
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        query: |
+          INSERT INTO compliance_results
+            (hostname, framework, policy_name, policy_version, compliant,
+             total_controls, passed_controls, failed_controls,
+             compliance_percentage, violations, metadata)
+          VALUES
+            (%s, 'golden_image', %s, 'ssh-v1', %s,
+             1, %s, %s,
+             %s, %s::jsonb, %s::jsonb)
+        positional_args:
+          - "{{ target_host }}"
+          - "{{ gi_key }}_check"
+          - "{{ not (is_drift_present | bool) }}"
+          - "{{ 0 if is_drift_present | bool else 1 }}"
+          - "{{ 1 if is_drift_present | bool else 0 }}"
+          - "{{ 0.00 if is_drift_present | bool else 100.00 }}"
+          - "{{ ([{'control': gi_key, 'message': gi_path ~ ' drifted from baseline'}] if is_drift_present | bool else []) | to_json }}"
+          - "{{ {'baseline_id': gi_baseline_id, 'baseline_label': gi_baseline_label, 'file': gi_path, 'transport': 'ssh', 'aap_job_id': awx_job_id | default(None)} | to_json }}"
+
+    - name: Report — PASS (no drift)
+      ansible.builtin.debug:
+        msg:
+          - "GOLDEN IMAGE CHECK → PASS"
+          - "Target:   {{ target_host }} (ssh)"
+          - "Baseline: {{ gi_baseline_label }} (id={{ gi_baseline_id }}, captured {{ gi_baseline_when }})"
+          - "File:     {{ gi_path }} matches the approved baseline."
+      when: not (is_drift_present | bool)
+
+    - name: Report — FAIL (drift detected)
+      ansible.builtin.debug:
+        msg: |
+          GOLDEN IMAGE CHECK → FAIL
+          Target:   {{ target_host }} (ssh)
+          Baseline: {{ gi_baseline_label }} (id={{ gi_baseline_id }}, captured {{ gi_baseline_when }})
+          File:     {{ gi_path }}
+          DRIFT DETECTED — {{ gi_key }} does not match the approved baseline.
+          --- BASELINE (approved) ---
+          {{ gi_baseline_content }}
+          --- CURRENT (on host) ---
+          {{ gi_current_text }}
+      when: is_drift_present | bool
+
+    - name: Fail the job on drift when the caller asked for it (the Enforcement `verify` node)
+      ansible.builtin.fail:
+        msg: "{{ gi_path }} on {{ target_host }} still differs from baseline '{{ gi_baseline_label }}'."
+      when:
+        - is_drift_present | bool
+        - fail_on_drift | default(false) | bool

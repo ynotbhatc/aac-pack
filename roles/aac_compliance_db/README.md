@@ -8,7 +8,7 @@ database for Ansible Automated Compliance (AAC).
 1. Pulls the PostgreSQL image and creates the `compliance_pgdata` named volume
 2. Recreates the `postgresql` container on port 5432
 3. Waits for PostgreSQL to accept connections
-4. Creates all four compliance schema tables (idempotent — `IF NOT EXISTS`)
+4. Creates the compliance schema — 32 tables and 8 views, see below (idempotent — `IF NOT EXISTS`)
 5. Creates the `compliance_reader` read-only role with SELECT grants
 6. Runs a health check verifying table presence
 7. Optionally generates a podman systemd unit for on-boot startup
@@ -23,6 +23,28 @@ database for Ansible Automated Compliance (AAC).
 | `host_facts_latest` | View | Most recent snapshot per host |
 | `sidecar_datasets` | Table | Org context: Digital Sovereignty, NERC-CIP assets |
 | `sidecar_datasets_latest` | View | Most recent sidecar per type+entity |
+| `technical_debt_items`, `technical_debt_summary`, `technical_debt_summary_latest` | Tables, View | Technical-debt ledger and roll-up |
+| `remediation_rates`, `remediation_budgets`, `framework_catalog`, `customer_frameworks` | Tables | Remediation cost model and framework catalog |
+| `compliance_certifications` | Table | Signed CAA certifications |
+| `ai_systems`, `ai_action_log`, `ai_approval_requests` | Tables | AI governance decision log (`files/ai_action_log_schema.sql`) |
+| `installed_inventory`, `manual_product_declarations`, `inventory_catalog` | Tables, Mat. view | Installed-component inventory (`files/inventory_catalog_schema.sql`) |
+| `cve_events_received`, `cve_vendor_remediations` | Tables | AAC-side CVE cache (`files/cve_cache_schema.sql`) |
+| `patch_manifest_raw`, `patch_worklist` | Tables | Patch worklist (`files/patch_worklist_schema.sql`) |
+| `product_lifecycle`, `support_status_map`, `host_support_status` | Tables | Vendor support status (`files/support_status_schema.sql`) |
+| `patch_risk_parameters`, `patch_risk_scores`, `patch_heatmap_cells`, `patch_heatmap_latest`, `patch_unpatched_systems` | Tables, Views | Patch risk scoring (`files/patch_risk_schema.sql`) |
+| `golden_image_baselines`, `helpdesk_tickets`, `remediation_log` | Tables | Golden Image governed drift (`files/golden_image_schema.sql`) |
+| `patch_traffic_state`, `patch_assurance_results`, `patch_backup_manifests`, `patch_traffic_current`, `patch_traffic_stranded` | Tables, Views | Patch change record, traffic and assurance (`files/patch_change_schema.sql`) |
+
+The `files/*.sql` scripts are applied by `tasks/schema.yml` in dependency order,
+one `postgresql_script` task per file, no loops and no conditions: the
+sales.demos platform parses that task file and replays its statements through
+psql as its application role, so a looped or conditional task would render
+wrong there. Six of the files are also re-applied at start by the playbooks
+that own their tables; `cve_cache_schema.sql` and `golden_image_schema.sql`
+are applied by this role only, so re-run the role (schema-only, Template 79)
+on an existing database before expecting those tables. A fresh install
+creates **32 tables and 8 views** (measured 2026-10-10 against PostgreSQL 15 as
+a non-superuser owner, two consecutive runs clean).
 
 All DDL is idempotent — safe to re-run for schema migrations.
 

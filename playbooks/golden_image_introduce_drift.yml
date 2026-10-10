@@ -1,0 +1,87 @@
+---
+# golden_image_introduce_drift.yml — DEMO HELPER: deliberately break the
+# golden baseline on a managed host, over SSH, so the governed-drift workflow
+# has something to govern.
+#
+# Product-tier shape of contrib/mac-aap/playbooks/golden_image_introduce_drift_macaap.yml.
+# It changes ONE line in ONE configuration file on disk — by default
+# /etc/selinux/config SELINUX=enforcing → permissive, which is CIS 1.6 / NIST
+# AC-3 territory and routes as critical drift — and nothing else: no reboot,
+# no setenforce, no service restart. The running kernel keeps enforcing until
+# the next boot; "Golden Image Rollback" puts the file back before that.
+#
+# It does not notify anything. On the lab the EDA rulebook watches the file;
+# on an Automation Orchestrator platform the workflow is started by its own
+# trigger. Run this, then start the workflow (or let the rulebook).
+#
+# ── Required extra_vars ─────────────────────────────────────────────────────
+#   target_host         Inventory hostname.
+#   confirm_drift       Must be the string "yes". A demo helper that weakens a
+#                       host must never run by accident from a template with
+#                       stale defaults.
+# There are no other inputs. The file, the match and the replacement are
+# FIXED in this playbook: it edits /etc/selinux/config and nothing else, as
+# root, so none of that is a launch-time variable.
+
+- name: Introduce Drift — confirm intent
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require an explicit confirmation and a known target
+      ansible.builtin.assert:
+        that:
+          - (confirm_drift | default('') | string) == 'yes'
+          - target_host is defined
+          - target_host in hostvars
+        fail_msg: >-
+          This play weakens a host on purpose. It needs confirm_drift=yes and a
+          target_host that is in this job's inventory
+          (got confirm_drift='{{ confirm_drift | default('') }}', target_host='{{ target_host | default('') }}').
+        quiet: true
+
+- name: Introduce Drift — change the monitored file on the target
+  hosts: "{{ target_host | default('no-such-host') }}"
+  gather_facts: false
+  become: true
+  vars:
+    gi_path: /etc/selinux/config
+  tasks:
+    - name: Refuse to run against anything but /etc/selinux/config (literal; a launch variable cannot change it)
+      ansible.builtin.assert:
+        that:
+          - gi_path == '/etc/selinux/config'
+        fail_msg: "This demo helper edits /etc/selinux/config only."
+        quiet: true
+
+    - name: Drift — SELINUX=enforcing → SELINUX=permissive in /etc/selinux/config
+      ansible.builtin.lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX=enforcing$'
+        line: SELINUX=permissive
+        backup: true
+      register: gi_drift
+
+    - name: Say whether anything changed (an already-drifted host changes nothing)
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'DRIFT INTRODUCED on ' ~ inventory_hostname ~ ': ' ~ gi_path ~ ' (previous content at ' ~ gi_drift.backup | default('n/a') ~ ')'
+             if gi_drift.changed else
+             'NO CHANGE on ' ~ inventory_hostname ~ ': ' ~ gi_path ~ ' has no SELINUX=enforcing line — it may already be drifted.' }}
+
+    - name: Show the drifted file
+      ansible.builtin.slurp:
+        src: "{{ gi_path }}"
+      register: gi_now
+
+    - name: Current content
+      ansible.builtin.debug:
+        msg: "{{ gi_now.content | b64decode }}"
+
+    - name: Publish for the workflow
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          drift_introduced: "{{ gi_drift.changed | bool }}"
+          changed_file: "{{ gi_path }}"

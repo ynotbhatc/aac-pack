@@ -619,3 +619,90 @@
     login_password: "{{ aac_db_password }}"
     db: "{{ pg_db }}"
     path: "{{ role_path }}/../../files/ai_action_log_schema.sql"
+
+# ── Patch intelligence, CVE cache and Golden Image ───────────────────────────
+# Until 2026-10-10 the role created only the fourteen tables above (eleven
+# inline, three from ai_action_log_schema.sql); every other table the
+# product's playbooks read was created by whichever playbook or demo seed
+# happened to run first, so a fresh install that ran Identify Affected
+# Components, Simulate Patch Risk or the Golden Image family failed at its
+# first query (sales.demos#883). The role is the schema now: everything a
+# shipped playbook reads is created here. Six of the files are the same ones
+# their owning playbooks re-apply at start; cve_cache_schema.sql and
+# golden_image_schema.sql are applied by the role ONLY, so a database the
+# role has not been re-run on since this change still lacks those tables.
+# Every statement is IF NOT EXISTS / CREATE OR REPLACE / ADD COLUMN IF NOT
+# EXISTS, so re-running in either order is safe.
+#
+# ORDER MATTERS between files: cve_vendor_remediations references
+# cve_events_received; patch_change_schema.sql ALTERs helpdesk_tickets, which
+# golden_image_schema.sql creates.
+#
+# ONE FILE PER TASK, NO LOOP, NO WHEN. The sales.demos platform does not run
+# these tasks; it parses this file, collects each task's `query` / `loop`
+# strings and each postgresql_script `path`, and applies the result through
+# psql as the application role (its playbooks/install_aac_db.yml). A looped
+# script task or a conditional one would be rendered wrong there.
+
+- name: Create inventory catalog schema (installed_inventory, manual_product_declarations, inventory_catalog)
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/inventory_catalog_schema.sql"
+
+- name: Create CVE cache schema (cve_events_received, cve_vendor_remediations)
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/cve_cache_schema.sql"
+
+- name: Create patch worklist schema (patch_manifest_raw, patch_worklist)
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/patch_worklist_schema.sql"
+
+- name: Create support status schema (product_lifecycle, support_status_map, host_support_status)
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/support_status_schema.sql"
+
+- name: Create patch risk schema (patch_risk_parameters, patch_risk_scores, patch_heatmap_cells, views)
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/patch_risk_schema.sql"
+
+- name: Create Golden Image schema (golden_image_baselines, helpdesk_tickets, remediation_log)
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/golden_image_schema.sql"
+
+- name: Create patch change-record schema (helpdesk_tickets columns, patch_traffic_state, patch_assurance_results, patch_backup_manifests)
+  community.postgresql.postgresql_script:
+    login_host: "{{ pg_host }}"
+    login_port: "{{ pg_port | default(5432) }}"
+    login_user: "{{ pg_user }}"
+    login_password: "{{ aac_db_password }}"
+    db: "{{ pg_db }}"
+    path: "{{ role_path }}/../../files/patch_change_schema.sql"

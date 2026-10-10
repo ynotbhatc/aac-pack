@@ -2,9 +2,9 @@
 pack_version: 1
 source:
   repository: ynotbhatc/compliance
-  commit: 130234815bc0fd7b590ba38b67b7d80e9b089a56
-  committed_at: '2026-10-09T01:58:41Z'
-  branch: main
+  commit: fef249b691297ae918f9d2b30ac84410a4ccbada
+  committed_at: '2026-10-10T10:19:04-07:00'
+  branch: feat/golden-image-ssh
 files:
   LICENSE:
     source: LICENSE
@@ -33,12 +33,30 @@ files:
   files/ai_action_log_schema.sql:
     source: ansible/files/ai_action_log_schema.sql
     sha256: 1fd14324213b51a6ca9f1edf7c412aa74ac559c890ee1461892d989fa1c3f065
+  files/cve_cache_schema.sql:
+    source: ansible/files/cve_cache_schema.sql
+    sha256: 95738bc28125e2bae7e3ea8149371cdb59c9816b31383a01945b70297dc0d23c
+  files/demo_cve_fixture.sql:
+    source: ansible/files/demo_cve_fixture.sql
+    sha256: 3a57c713ce5d6be4cdeb66e6b84c24bba4cf74628d80a6cb33b6598a3e6798e1
+  files/golden_image_schema.sql:
+    source: ansible/files/golden_image_schema.sql
+    sha256: 300cf13f3bd60459214fb511f4da56579871fc065ad4d6ab02f9cd7434450d5e
   files/inventory_catalog_schema.sql:
     source: ansible/files/inventory_catalog_schema.sql
     sha256: 1d3ff969301c820513c5592d2e629c40518a2b754069cab11f8547bfb148f860
+  files/patch_change_schema.sql:
+    source: ansible/files/patch_change_schema.sql
+    sha256: 47c3088bc26466a1ef2e7164af4372b45583a62a71c208c8a496512af639cc8a
   files/patch_risk_schema.sql:
     source: ansible/files/patch_risk_schema.sql
     sha256: e458aff9c69921c6d1626374ff5c4d72a36ed4973af7a259b1726f96d1c74eb9
+  files/patch_worklist_schema.sql:
+    source: ansible/files/patch_worklist_schema.sql
+    sha256: 17dfe7aef32426251f35ad2f3c52558bbd23d3327156e82226113f2b91c1b5c1
+  files/support_status_schema.sql:
+    source: ansible/files/support_status_schema.sql
+    sha256: 8683ec55b16f54a3123a81e3f3e63f0d3e45c0e22381e659df9b93b04f87475f
   grafana/aac_compliance_dashboard.json:
     source: grafana/dashboards/aac_compliance_dashboard.json
     sha256: 157069809073712f481a2aa0f68dbbb8d7ee9d830d09bd38cc110bc2166d5718
@@ -111,12 +129,24 @@ files:
   playbooks/current_state_query_macaap.yml:
     source: contrib/mac-aap/playbooks/current_state_query_macaap.yml
     sha256: f1b7b15a216d9c71ee6114d11333413b3f16072ba2f0f61c857a1bfd3dcb99c5
+  playbooks/golden_image_capture_baseline.yml:
+    source: ansible/playbooks/golden_image_capture_baseline.yml
+    sha256: a9e4fcaa68de1b9d615471f005ec4b64c0e1614bf389af912d93044bfb0314b2
+  playbooks/golden_image_check.yml:
+    source: ansible/playbooks/golden_image_check.yml
+    sha256: 380484e916c3528c389d7a2eb21df6ace52cb99e798d974c06d56e7a54a10e9e
   playbooks/golden_image_check_macaap.yml:
     source: contrib/mac-aap/playbooks/golden_image_check_macaap.yml
     sha256: 73763d0e5a13b7cb0496becf37da54dc3de667ec8cb4e45cc788fcbc2063f64b
+  playbooks/golden_image_introduce_drift.yml:
+    source: ansible/playbooks/golden_image_introduce_drift.yml
+    sha256: 09696118b85da4f1059fa5a72cf909ca23c0924c93a31eee0e44b3eca796ee23
   playbooks/golden_image_notify_helpdesk_macaap.yml:
     source: contrib/mac-aap/playbooks/golden_image_notify_helpdesk_macaap.yml
     sha256: 26c3cd6551cbec852e64d7784bda58a7453cac092932d5f9fe0adce9878e3c1b
+  playbooks/golden_image_rollback.yml:
+    source: ansible/playbooks/golden_image_rollback.yml
+    sha256: fb5471b71d14fbed610dbdef833bc5de28238c374e90061f143873d6cd4b6ea1
   playbooks/golden_image_rollback_macaap.yml:
     source: contrib/mac-aap/playbooks/golden_image_rollback_macaap.yml
     sha256: 35c1005bacd8669d9087ced6ad53f38b37c8ccfd04cd106c637f3df27975e06c
@@ -137,7 +167,7 @@ files:
     sha256: e10ca23de57054d7280e903f833545385ead028a7c96dca828999a22606edde9
   roles/aac_compliance_db/README.md:
     source: ansible/roles/aac_compliance_db/README.md
-    sha256: 45ff53a3e9268b571096751fd50e37c0701c7fb9985c63f5a2da3d56eed1793a
+    sha256: 824593d069ca9fe41bd5a6f6f1d2b2e7725fb1be2f30b1b89ab5cd11c52d384f
   roles/aac_compliance_db/defaults/main.yml:
     source: ansible/roles/aac_compliance_db/defaults/main.yml
     sha256: fe33506235eb6108abad95196c028369fc52bfca9c7b627c515275f80de6c236
@@ -158,7 +188,7 @@ files:
     sha256: 4453444d1bf717e4e79f81c89a41bc69cd3ae1fc549d1b1be5bf9d435db2f38a
   roles/aac_compliance_db/tasks/schema.yml:
     source: ansible/roles/aac_compliance_db/tasks/schema.yml
-    sha256: 6f07845ef4d36732e4b2444cdc260f179b595e2737377f85b1ace8a35a86dda4
+    sha256: 6f07d797928ce7360086e667d4e0273e925d726821a269b83f1ef49eeb32d032
   roles/aac_compliance_db/tasks/systemd.yml:
     source: ansible/roles/aac_compliance_db/tasks/systemd.yml
     sha256: b9e7cf3051d00407de048f98f2363c82c234b7cba169dcd3255dbd1662fcc4aa

@@ -1,0 +1,194 @@
+---
+# golden_image_rollback.yml — restore a managed host's monitored golden file
+# from its approved baseline, over SSH.
+#
+# Product-tier shape of contrib/mac-aap/playbooks/golden_image_rollback_macaap.yml
+# (which writes into a container through k8s_exec). See golden_image_check.yml
+# for why: the targets are VMs, AAP reaches them over SSH, the database work
+# stays on the controller.
+#
+# AO / Enforcement-workflow artifact (unchanged): rollback_verified.
+#
+# ── Required extra_vars ─────────────────────────────────────────────────────
+#   target_host                          Inventory hostname (baseline key).
+#   pg_host / pg_user / pg_db / pg_password (or compliance_db_password)
+# ── Optional ────────────────────────────────────────────────────────────────
+#   golden_file_key     Default selinux_config.
+#                       The destination comes from a map FIXED IN THIS FILE and
+#                       is re-checked against a literal list inside the
+#                       privileged play; no launch-time variable can aim the
+#                       root write at an arbitrary path.
+#   auto_rollback                        Accepted from the workflow for the
+#                                        record; the decision to run this play
+#                                        was already made by the policy route.
+#
+# The file is written with a backup (the drifted version stays on the host as
+# <path>.<timestamp>~) and the play verifies by reading it back.
+
+- name: Golden Image Rollback — resolve the target and its approved baseline
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load site config if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/site_config.yml'], errors='ignore') }}"
+
+    - name: Load vault secrets if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/vault_secrets.yml'], errors='ignore') }}"
+      no_log: true
+
+    - name: Require a target that the inventory knows
+      ansible.builtin.assert:
+        that:
+          - target_host is defined
+          - (target_host | default('', true)) | length > 0
+          - target_host in hostvars
+        fail_msg: >-
+          target_host='{{ target_host | default('') }}' is not a host in this
+          job's inventory — a rollback that matches no host would report
+          nothing. Refusing.
+        quiet: true
+
+    - name: Require a database host
+      ansible.builtin.assert:
+        that:
+          - (pg_host | default('', true)) | length > 0
+        fail_msg: "pg_host is not set (site_config.yml, credential, or extra_vars)."
+        quiet: true
+
+    - name: Fetch the current baseline for {{ target_host }}
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        query: |
+          SELECT id, baseline_label, golden_files
+          FROM golden_image_baselines
+          WHERE hostname = %s AND is_current = true
+          ORDER BY captured_at DESC
+          LIMIT 1
+        positional_args:
+          - "{{ target_host }}"
+      register: golden_result
+
+    - name: Fail if no baseline exists for this host
+      ansible.builtin.fail:
+        msg: "No current baseline for {{ target_host }} in golden_image_baselines. Cannot roll back."
+      when: golden_result.query_result | length == 0
+
+    - name: The golden file map — fixed in the playbook, never a launch variable
+      ansible.builtin.set_fact:
+        gi_files_map:
+          sshd_config: /etc/ssh/sshd_config
+          selinux_config: /etc/selinux/config
+          auditd_conf: /etc/audit/auditd.conf
+          audit_rules: /etc/audit/rules.d/99-cis.rules
+          sysctl_conf: /etc/sysctl.d/99-cis.conf
+
+    - name: Refuse a key outside the golden file map (the path is never free-form)
+      ansible.builtin.assert:
+        that:
+          - (golden_file_key | default('selinux_config')) in gi_files_map
+        fail_msg: >-
+          golden_file_key='{{ golden_file_key | default('selinux_config') }}' is not in
+          the golden file map fixed in this playbook; a launch-time variable can
+          never name an arbitrary file. To monitor another file, change the pack.
+        quiet: true
+
+    - name: Fail if the baseline has no entry for the monitored file
+      ansible.builtin.fail:
+        msg: >-
+          Baseline '{{ golden_result.query_result[0].baseline_label }}' for
+          {{ target_host }} has no '{{ golden_file_key | default('selinux_config') }}' key.
+      when: (golden_file_key | default('selinux_config')) not in golden_result.query_result[0].golden_files
+
+    - name: Keep the baseline for the host play
+      ansible.builtin.set_fact:
+        gi_key: "{{ golden_file_key | default('selinux_config') }}"
+        gi_path: "{{ gi_files_map[golden_file_key | default('selinux_config')] }}"
+        gi_baseline_id: "{{ golden_result.query_result[0].id }}"
+        gi_baseline_label: "{{ golden_result.query_result[0].baseline_label }}"
+        gi_baseline_content: "{{ golden_result.query_result[0].golden_files[golden_file_key | default('selinux_config')] }}"
+
+- name: Golden Image Rollback — restore the file on the target
+  hosts: "{{ target_host | default('no-such-host') }}"
+  gather_facts: false
+  become: true
+  vars:
+    gi_target_path: "{{ hostvars['localhost'].gi_path }}"
+  tasks:
+    - name: Refuse any path outside the five golden files (literal list; a launch variable cannot widen it)
+      ansible.builtin.assert:
+        that:
+          - gi_target_path in ['/etc/ssh/sshd_config', '/etc/selinux/config', '/etc/audit/auditd.conf', '/etc/audit/rules.d/99-cis.rules', '/etc/sysctl.d/99-cis.conf']
+        fail_msg: "Refusing to touch '{{ gi_target_path }}' as root: not one of the golden files this play is allowed to handle."
+        quiet: true
+
+    - name: Restore {{ hostvars['localhost'].gi_path }} from baseline '{{ hostvars['localhost'].gi_baseline_label }}'
+      ansible.builtin.copy:
+        content: "{{ hostvars['localhost'].gi_baseline_content }}"
+        dest: "{{ gi_target_path }}"
+        backup: true
+        mode: preserve
+      register: gi_restore
+
+    - name: Read it back
+      ansible.builtin.slurp:
+        src: "{{ gi_target_path }}"
+      register: gi_after
+
+    - name: Hand the result back to the controller
+      ansible.builtin.set_fact:
+        gi_after_text: "{{ gi_after.content | b64decode }}"
+        gi_backup_file: "{{ gi_restore.backup_file | default('') }}"
+
+- name: Golden Image Rollback — verify and publish
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    rollback_ok: "{{ (hostvars[target_host].gi_after_text | trim) == (gi_baseline_content | trim) }}"
+  tasks:
+    - name: Publish the rollback outcome as workflow stats
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          rollback_verified: "{{ rollback_ok | bool }}"
+
+    - name: Record what was changed
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        query: |
+          INSERT INTO remediation_log
+            (hostname, control_id, control_name, action_taken, result, playbook_name, before_state, after_state)
+          VALUES (%s, %s, %s, 'rollback_to_golden_image', %s, 'golden_image_rollback.yml', %s::jsonb, %s::jsonb)
+        positional_args:
+          - "{{ target_host }}"
+          - "{{ gi_key }}"
+          - "{{ gi_path }}"
+          - "{{ 'restored' if rollback_ok | bool else 'verify_failed' }}"
+          - "{{ {'backup_file': hostvars[target_host].gi_backup_file} | to_json }}"
+          - "{{ {'baseline_id': gi_baseline_id, 'baseline_label': gi_baseline_label, 'verified': rollback_ok | bool} | to_json }}"
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "ROLLBACK → {{ 'SUCCESS' if rollback_ok | bool else 'FAIL' }}"
+          - "Target:   {{ target_host }} (ssh)"
+          - "Baseline: {{ gi_baseline_label }} (id={{ gi_baseline_id }})"
+          - "File:     {{ gi_path }} restored; previous content kept at {{ hostvars[target_host].gi_backup_file | default('(unchanged)', true) }}"
+          - "Run 'Golden Image Check' again to verify PASS."
+
+    - name: Fail the play if the rollback did not take
+      ansible.builtin.fail:
+        msg: "{{ gi_path }} on {{ target_host }} does not match baseline '{{ gi_baseline_label }}' after the restore."
+      when: not (rollback_ok | bool)

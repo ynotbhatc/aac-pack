@@ -1,0 +1,176 @@
+---
+# golden_image_capture_baseline.yml — capture a managed host's current golden
+# files as its approved baseline, over SSH.
+#
+# The Golden Image family (check / rollback / notify) reads
+# golden_image_baselines; until now that table was seeded only by the demo
+# seed in aac-demos, which read a bind-mounted /opt/golden-image tree on the
+# lab host. This is the product-tier capture: it reads the files from the
+# target itself, so it works on any host AAP can reach — a CIS-hardened VM
+# straight from its golden image is the natural moment to run it.
+#
+# One current baseline per hostname: previous rows are marked is_current=false,
+# never deleted (the history is evidence).
+#
+# ── Required extra_vars ─────────────────────────────────────────────────────
+#   target_host                          Inventory hostname (baseline key).
+#   pg_host / pg_user / pg_db / pg_password (or compliance_db_password)
+# ── Optional ────────────────────────────────────────────────────────────────
+#   baseline_label      Default: "<target_host>-<UTC date>"
+#   (the file set is FIXED in this playbook: the five keys the check/rollback
+#    plays and the demo seed use; it is read as root, so it is not a variable)
+#   golden_require_all  true → a missing file fails the capture (default).
+#                       false → missing files are skipped and named; a later
+#                       check for that key fails with "no entry in baseline".
+
+- name: Golden Image Capture Baseline — resolve the target
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load site config if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/site_config.yml'], errors='ignore') }}"
+
+    - name: Load vault secrets if present
+      ansible.builtin.include_vars: "{{ item }}"
+      loop: "{{ query('first_found', ['../vars/vault_secrets.yml'], errors='ignore') }}"
+      no_log: true
+
+    - name: Require a target that the inventory knows
+      ansible.builtin.assert:
+        that:
+          - target_host is defined
+          - (target_host | default('', true)) | length > 0
+          - target_host in hostvars
+        fail_msg: "target_host='{{ target_host | default('') }}' is not a host in this job's inventory. Refusing."
+        quiet: true
+
+    - name: Require a database host
+      ansible.builtin.assert:
+        that:
+          - (pg_host | default('', true)) | length > 0
+        fail_msg: "pg_host is not set (site_config.yml, credential, or extra_vars)."
+        quiet: true
+
+    - name: Settle the file map and label
+      ansible.builtin.set_fact:
+        gi_files_map:
+          sshd_config: /etc/ssh/sshd_config
+          selinux_config: /etc/selinux/config
+          auditd_conf: /etc/audit/auditd.conf
+          audit_rules: /etc/audit/rules.d/99-cis.rules
+          sysctl_conf: /etc/sysctl.d/99-cis.conf
+        gi_label: "{{ baseline_label | default(target_host ~ '-' ~ lookup('pipe', 'date -u +%Y-%m-%d')) }}"
+
+- name: Golden Image Capture Baseline — read the golden files on the target
+  hosts: "{{ target_host | default('no-such-host') }}"
+  gather_facts: false
+  become: true
+  vars:
+    gi_files_map: "{{ hostvars['localhost'].gi_files_map }}"
+  tasks:
+    - name: Refuse any path outside the five golden files (literal list; a launch variable cannot widen it)
+      ansible.builtin.assert:
+        that:
+          - gi_files_map.values() | reject('in', ['/etc/ssh/sshd_config', '/etc/selinux/config', '/etc/audit/auditd.conf', '/etc/audit/rules.d/99-cis.rules', '/etc/sysctl.d/99-cis.conf']) | list | length == 0
+        fail_msg: "Refusing to read {{ gi_files_map.values() | list }} as root: not the golden file set this play is allowed to handle."
+        quiet: true
+
+    - name: Stat every golden file
+      ansible.builtin.stat:
+        path: "{{ item.value }}"
+      loop: "{{ gi_files_map | dict2items }}"
+      loop_control:
+        label: "{{ item.key }} → {{ item.value }}"
+      register: gi_stat
+
+    - name: Refuse a partial baseline unless told otherwise
+      ansible.builtin.assert:
+        that:
+          - gi_stat.results | rejectattr('stat.exists') | list | length == 0
+        fail_msg: >-
+          Missing on {{ inventory_hostname }}:
+          {{ gi_stat.results | rejectattr('stat.exists') | map(attribute='item.value') | list }}.
+          Set golden_require_all=false to capture the rest.
+        quiet: true
+      when: golden_require_all | default(true) | bool
+
+    - name: Read the files that exist
+      ansible.builtin.slurp:
+        src: "{{ item.item.value }}"
+      loop: "{{ gi_stat.results | selectattr('stat.exists') | list }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      register: gi_read
+
+    - name: Hand the contents back to the controller
+      ansible.builtin.set_fact:
+        gi_golden_files: >-
+          {{ dict(gi_read.results | map(attribute='item.item.key')
+                  | zip(gi_read.results | map(attribute='content') | map('b64decode'))) }}
+        gi_skipped: "{{ gi_stat.results | rejectattr('stat.exists') | map(attribute='item.key') | list }}"
+
+- name: Golden Image Capture Baseline — store it
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    gi_golden_files: "{{ hostvars[target_host].gi_golden_files }}"
+    gi_skipped: "{{ hostvars[target_host].gi_skipped }}"
+  tasks:
+    - name: Refuse an empty baseline
+      ansible.builtin.assert:
+        that: gi_golden_files | length > 0
+        fail_msg: "No golden file could be read on {{ target_host }}; nothing to store."
+        quiet: true
+
+    - name: Mark previous baselines for {{ target_host }} as not current
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        query: |
+          UPDATE golden_image_baselines
+          SET is_current = false
+          WHERE hostname = %s AND is_current = true
+        positional_args:
+          - "{{ target_host }}"
+
+    - name: Insert the new baseline
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port | default(5432) }}"
+        login_user: "{{ pg_user | default('postgres') }}"
+        login_password: "{{ pg_password | default(compliance_db_password | default(omit)) }}"
+        db: "{{ pg_db | default('compliance') }}"
+        query: |
+          INSERT INTO golden_image_baselines
+            (hostname, baseline_label, is_current, golden_files)
+          VALUES (%s, %s, true, %s::jsonb)
+          RETURNING id, captured_at
+        positional_args:
+          - "{{ target_host }}"
+          - "{{ gi_label }}"
+          - "{{ gi_golden_files | to_json }}"
+      register: gi_insert
+
+    - name: Publish the baseline id as workflow stats
+      ansible.builtin.set_stats:
+        aggregate: false
+        per_host: false
+        data:
+          baseline_id: "{{ gi_insert.query_result[0].id }}"
+          baseline_label: "{{ gi_label }}"
+          baseline_keys: "{{ gi_golden_files.keys() | list }}"
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "GOLDEN IMAGE BASELINE CAPTURED"
+          - "Target:   {{ target_host }} (ssh)"
+          - "Baseline: {{ gi_label }} (id={{ gi_insert.query_result[0].id }}, captured {{ gi_insert.query_result[0].captured_at }})"
+          - "Keys:     {{ gi_golden_files.keys() | list | join(', ') }}"
+          - "Skipped:  {{ gi_skipped | join(', ') if gi_skipped | length > 0 else 'none' }}"
